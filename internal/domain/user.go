@@ -13,7 +13,7 @@ type User struct {
 	Tel         string    `db:"tel"`
 	Email       string    `db:"email"`
 	RoleType    string    `db:"role_type"`
-	UtmSource   string    `db:"utm_string"`
+	UtmSource   string    `db:"utm_source"`
 	LastLoginAt time.Time `db:"last_login_at"`
 	CreatedAt   time.Time `db:"created_at"`
 }
