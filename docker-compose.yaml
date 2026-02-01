@@ -2,14 +2,14 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16-apline
+    image: postgres:16-alpine
     container_name: repricer_db
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: repricer_db
     volumes:
       - pg_data:/var/lib/postgresql/data 
     restart: always
@@ -26,6 +26,7 @@ services:
     restart: always
     networks:
       - repricer-net
+    
 
 volumes:
   pg_data:
