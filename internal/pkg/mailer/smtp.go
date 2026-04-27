@@ -1,0 +1,94 @@
+package mailer
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
+	"net/smtp"
+	"strings"
+)
+
+// SmtpMailer отправляет письма через Яндекс.Почту (smtp.yandex.ru:465, TLS).
+// Для авторизации требуется пароль приложения — не обычный пароль аккаунта.
+type SmtpMailer struct {
+	host     string
+	port     string
+	username string
+	password string
+	from     string
+}
+
+func NewSmtpMailer(host, port, username, password, from string) *SmtpMailer {
+	return &SmtpMailer{
+		host:     host,
+		port:     port,
+		username: username,
+		password: password,
+		from:     from,
+	}
+}
+
+func (m *SmtpMailer) Send(_ context.Context, to, subject, htmlBody, textBody string) error {
+	// Яндекс.Почта на порту 465 требует TLS с первого байта (SSL), не STARTTLS.
+	tlsCfg := &tls.Config{
+		ServerName: m.host,
+		MinVersion: tls.VersionTLS12,
+	}
+	conn, err := tls.Dial("tcp", net.JoinHostPort(m.host, m.port), tlsCfg)
+	if err != nil {
+		return fmt.Errorf("smtp: tls dial: %w", err)
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, m.host)
+	if err != nil {
+		return fmt.Errorf("smtp: new client: %w", err)
+	}
+	defer client.Quit() //nolint:errcheck
+
+	if err = client.Auth(smtp.PlainAuth("", m.username, m.password, m.host)); err != nil {
+		return fmt.Errorf("smtp: auth: %w", err)
+	}
+	if err = client.Mail(m.from); err != nil {
+		return fmt.Errorf("smtp: MAIL FROM: %w", err)
+	}
+	if err = client.Rcpt(to); err != nil {
+		return fmt.Errorf("smtp: RCPT TO: %w", err)
+	}
+
+	wc, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("smtp: DATA: %w", err)
+	}
+	defer wc.Close()
+
+	msg := buildMIMEMessage(m.from, to, subject, htmlBody, textBody)
+	if _, err = fmt.Fprint(wc, msg); err != nil {
+		return fmt.Errorf("smtp: write body: %w", err)
+	}
+	return nil
+}
+
+// buildMIMEMessage собирает multipart/alternative письмо (text + html).
+func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
+	boundary := "==RepricerX_boundary_001=="
+	var sb strings.Builder
+
+	sb.WriteString("From: " + from + "\r\n")
+	sb.WriteString("To: " + to + "\r\n")
+	sb.WriteString("Subject: " + subject + "\r\n")
+	sb.WriteString("MIME-Version: 1.0\r\n")
+	sb.WriteString(`Content-Type: multipart/alternative; boundary="` + boundary + `"` + "\r\n\r\n")
+
+	sb.WriteString("--" + boundary + "\r\n")
+	sb.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
+	sb.WriteString(textBody + "\r\n")
+
+	sb.WriteString("--" + boundary + "\r\n")
+	sb.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
+	sb.WriteString(htmlBody + "\r\n")
+
+	sb.WriteString("--" + boundary + "--\r\n")
+	return sb.String()
+}
