@@ -108,8 +108,7 @@ services:
       - "443:443"
     volumes:
       - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
-      - certbot_www:/var/www/certbot:ro
-      - certbot_conf:/etc/letsencrypt:ro
+      - ./docker/certs:/etc/nginx/certs:ro
       - web_dist:/usr/share/nginx/html:ro
     depends_on:
       - api
@@ -118,21 +117,9 @@ services:
     networks:
       - internal
 
-  certbot:
-    image: certbot/certbot:latest
-    container_name: repricer_certbot
-    volumes:
-      - certbot_www:/var/www/certbot
-      - certbot_conf:/etc/letsencrypt
-    # Автоматическое обновление сертификата каждые 12 часов
-    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
-    restart: unless-stopped
-
 volumes:
   pg_data:
   redis_data:
-  certbot_conf:
-  certbot_www:
   web_dist:
 
 networks:

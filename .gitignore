@@ -29,6 +29,12 @@ go.work.sum
 .env.local
 .env.prod
 
+# TLS-ключи и сертификаты — никогда не коммитить
+docker/certs/*.key
+docker/certs/*.pem
+*.key
+*.crt
+
 # бинарники сборки
 /api
 /worker
