@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,44 +24,42 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.uber.org/zap"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		panic("ошибка загрузки конфига: " + err.Error())
+		// Логгер ещё не готов — пишем в stderr напрямую.
+		slog.Error("ошибка загрузки конфига", "error", err)
+		os.Exit(1)
 	}
 
-	log, err := logger.New(cfg.Environment)
-	if err != nil {
-		panic("ошибка инициализации логгера: " + err.Error())
-	}
-	defer log.Sync() //nolint:errcheck
+	log := logger.New(cfg.Environment)
 
-	// Применяем миграции до старта HTTP-сервера
 	if err := runMigrations(cfg.DatabaseURL, log); err != nil {
-		log.Fatal("миграции не применились", zap.Error(err))
+		log.Error("миграции не применились", "error", err)
+		os.Exit(1)
 	}
 
-	// Подключаемся к Postgres через пул соединений
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-		log.Fatal("не удалось подключиться к Postgres", zap.Error(err))
+		log.Error("не удалось подключиться к Postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	if err := pool.Ping(context.Background()); err != nil {
-		log.Fatal("Postgres недоступен", zap.Error(err))
+		log.Error("Postgres недоступен", "error", err)
+		os.Exit(1)
 	}
 	log.Info("Postgres подключён")
 
 	if err := redischeck.Ping(context.Background(), cfg.RedisAddr); err != nil {
-		log.Fatal("Redis недоступен", zap.String("addr", cfg.RedisAddr), zap.Error(err))
+		log.Error("Redis недоступен", "addr", cfg.RedisAddr, "error", err)
+		os.Exit(1)
 	}
-	log.Info("Redis подключён", zap.String("addr", cfg.RedisAddr))
+	log.Info("Redis подключён", "addr", cfg.RedisAddr)
 
-	// Инициализируем зависимости сервисов.
 	usersRepo := repository.NewUsersRepository(pool)
 	sessionsRepo := repository.NewSessionsRepository(pool)
 	verRepo := repository.NewEmailVerificationsRepository(pool)
@@ -88,7 +87,6 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	// Базовые эндпоинты готовности — нужны для docker healthcheck
 	r.GET("/healthz", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
@@ -121,15 +119,15 @@ func main() {
 		for range ticker.C {
 			n, err := sessionsRepo.DeleteExpired(context.Background())
 			if err != nil {
-				log.Error("cleanup expired sessions", zap.Error(err))
+				log.Error("cleanup: expired sessions", "error", err)
 			} else if n > 0 {
-				log.Info("cleanup: удалены сессии", zap.Int64("count", n))
+				log.Info("cleanup: удалены сессии", "count", n)
 			}
 			n, err = verRepo.DeleteExpired(context.Background())
 			if err != nil {
-				log.Error("cleanup expired verifications", zap.Error(err))
+				log.Error("cleanup: expired verifications", "error", err)
 			} else if n > 0 {
-				log.Info("cleanup: удалены токены верификации", zap.Int64("count", n))
+				log.Info("cleanup: удалены токены верификации", "count", n)
 			}
 		}
 	}()
@@ -142,14 +140,14 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Graceful shutdown по SIGINT/SIGTERM
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		log.Info("HTTP сервер запущен", zap.String("addr", srv.Addr))
+		log.Info("HTTP сервер запущен", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal("ListenAndServe", zap.Error(err))
+			log.Error("ListenAndServe", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -159,13 +157,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Error("принудительное завершение", zap.Error(err))
+		log.Error("принудительное завершение", "error", err)
 	}
 	log.Info("сервер остановлен")
 }
 
 // runMigrations применяет все pending-миграции из директории migrations/.
-func runMigrations(databaseURL string, log *zap.Logger) error {
+func runMigrations(databaseURL string, log *slog.Logger) error {
 	m, err := migrate.New("file://migrations", databaseURL)
 	if err != nil {
 		return err
