@@ -1,0 +1,45 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+# Гарантирует что только один деплой выполняется одновременно
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    # Деплой только после успешного CI
+    needs: []
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /home/repricer/repricerx
+
+            echo "==> git pull"
+            git pull origin main
+
+            echo "==> build changed services"
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml build api worker web
+
+            echo "==> up -d"
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+
+            echo "==> waiting for API health..."
+            timeout 60 bash -c 'until docker exec repricer_api wget -qO- http://localhost:8080/healthz > /dev/null 2>&1; do sleep 2; done'
+
+            echo "==> prune old images"
+            docker image prune -f
+
+            echo "==> deploy complete"

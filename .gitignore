@@ -27,6 +27,7 @@ go.work.sum
 # env файлы — секреты не в репо
 .env
 .env.local
+.env.prod
 
 # бинарники сборки
 /api

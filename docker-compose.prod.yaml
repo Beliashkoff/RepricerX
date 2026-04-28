@@ -1,0 +1,140 @@
+# Production Compose.
+# Запуск: docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+# Секреты: .env.prod на сервере (не коммитить в git).
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: repricer_db
+    environment:
+      POSTGRES_USER: repricer
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: repricer_db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repricer -d repricer_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: repricer_redis
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: repricer_api
+    environment:
+      DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
+      REDIS_ADDR: redis:6379
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENVIRONMENT: prod
+      PORT: "8080"
+      ALLOWED_ORIGINS: https://${DOMAIN}
+      TRUST_PROXY_HEADERS: "true"
+      MAILER_MODE: ${MAILER_MODE:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-smtp.yandex.ru}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      VERIFICATION_URL_BASE: https://${DOMAIN}/verify
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    container_name: repricer_worker
+    environment:
+      DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
+      REDIS_ADDR: redis:6379
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENVIRONMENT: prod
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    container_name: repricer_web
+    volumes:
+      - web_dist:/dist
+    restart: unless-stopped
+    networks:
+      - internal
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: repricer_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - web_dist:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+      - web
+    restart: unless-stopped
+    networks:
+      - internal
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: repricer_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+    # Автоматическое обновление сертификата каждые 12 часов
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  certbot_conf:
+  certbot_www:
+  web_dist:
+
+networks:
+  internal:
+    driver: bridge
