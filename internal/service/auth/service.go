@@ -132,7 +132,7 @@ func (s *Service) sendVerification(ctx context.Context, user *domain.User) error
 	if err != nil {
 		return fmt.Errorf("render email template: %w", err)
 	}
-	return s.mailer.Send(ctx, user.Email, "Подтверждение email — AutoPrice", htmlBody, textBody)
+	return s.mailer.Send(ctx, user.Email, "Подтверждение email — RepricerX", htmlBody, textBody)
 }
 
 // VerifyEmailResult — результат верификации: нужен редирект на frontend.
