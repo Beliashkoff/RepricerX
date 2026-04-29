@@ -32,12 +32,12 @@ func IPPrefix(r *http.Request, trustProxy bool) string {
 func extractIP(r *http.Request, trustProxy bool) net.IP {
 	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// Берём самый левый IP — он ближайший к клиенту
 			parts := strings.SplitN(xff, ",", 2)
 			if ip := net.ParseIP(strings.TrimSpace(parts[0])); ip != nil {
 				return ip
 			}
 		}
+
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
 			if ip := net.ParseIP(strings.TrimSpace(xri)); ip != nil {
 				return ip
@@ -45,6 +45,7 @@ func extractIP(r *http.Request, trustProxy bool) net.IP {
 		}
 	}
 
+	// не доверяем прокси
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return net.ParseIP(r.RemoteAddr)

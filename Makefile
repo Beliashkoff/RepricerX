@@ -1,4 +1,4 @@
-.PHONY: up down build build-worker migrate test lint \
+.PHONY: up down build build-worker migrate test test-integration lint \
         prod-up prod-down prod-logs prod-ps
 
 # --- dev ---
@@ -23,6 +23,10 @@ migrate:
 
 test:
 	go test -race -cover ./...
+
+test-integration:
+	@test -n "$(DATABASE_URL)" || (echo "DATABASE_URL не задан" && exit 1)
+	go test -tags=integration -race -v ./tests/integration/...
 
 lint:
 	golangci-lint run ./...
