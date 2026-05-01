@@ -25,7 +25,7 @@ jobs:
           key: ${{ secrets.PROD_SSH_KEY }}
           script: |
             set -euo pipefail
-            cd /home/repricer/repricerx
+            cd /home/repricer/RepricerX
 
             echo "==> git pull"
             git pull origin main
