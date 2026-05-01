@@ -18,7 +18,7 @@ docker compose up --build
 - `GET http://localhost:8080/healthz`
 - `GET http://localhost:8080/ready`
 
-Для локальной разработки можно создать `.env` из `.env.example`, но `docker-compose.yaml` содержит dev-значения по умолчанию для первого запуска.
+Для локальной разработки `docker-compose.yaml` содержит dev-значения по умолчанию.
 
 # REST API
 
@@ -46,6 +46,24 @@ docker compose up --build
 
 > Все ошибки возвращаются в формате `{"error":{"code":"...","message":"..."}}`.  
 > Мутирующие защищённые эндпоинты проверяют заголовок `Origin` (same-origin CSRF).
+
+## Магазины `/api/shops`
+
+| Метод  | Путь                  | Авторизация | CSRF | Описание                                              |
+|--------|-----------------------|-------------|------|-------------------------------------------------------|
+| GET    | `/api/shops`          | cookie      | —    | Список магазинов текущего пользователя                |
+| GET    | `/api/shops/:id`      | cookie      | —    | Один магазин (только свой)                            |
+| POST   | `/api/shops`          | cookie      | да   | Создать магазин; credentials шифруются AES-256-GCM    |
+| PATCH  | `/api/shops/:id`      | cookie      | да   | Обновить имя, credentials, расписание, auto-update    |
+| DELETE | `/api/shops/:id`      | cookie      | да   | Удалить магазин                                       |
+| POST   | `/api/shops/:id/test` | cookie      | да   | Проверить подключение к маркетплейсу; меняет статус   |
+
+Поддерживаемые маркетплейсы: `wb` (Wildberries), `ozon` (Ozon).  
+Поле `credentials` в теле запроса зависит от маркетплейса:
+- **WB:** `{"api_key": "..."}`
+- **Ozon:** `{"client_id": "...", "api_key": "..."}`
+
+Статусы магазина: `draft` → `active` / `error` (после `/test`) → `disabled`.
 
 # Для разработчиков
 ## Pull Request

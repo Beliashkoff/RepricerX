@@ -425,8 +425,170 @@ add_endpoint(
     ],
 )
 
-# ── 3. Планируемые эндпоинты ──────────────────────────────────────────────────
-heading1(doc, "3. Планируемые эндпоинты (в разработке)")
+# ── 3. Магазины ───────────────────────────────────────────────────────────────
+heading1(doc, "3. Магазины  (/api/shops)")
+
+doc.add_paragraph(
+    "Credentials (API-ключи) шифруются AES-256-GCM перед записью в БД и "
+    "никогда не возвращаются в ответах API. "
+    "Поддерживаемые маркетплейсы: wb (Wildberries), ozon (Ozon)."
+)
+doc.add_paragraph()
+
+add_endpoint(
+    doc, "GET", "/api/shops",
+    summary="Список магазинов текущего пользователя",
+    auth_required=True, csrf_required=False,
+    description="Возвращает все магазины, принадлежащие авторизованному пользователю, в порядке создания.",
+    response_fields=[
+        ("[]",                 "array",         "Массив объектов shopResponse"),
+        ("[].id",              "string (UUID)", "Идентификатор магазина"),
+        ("[].marketplace",     "string (enum)", "Маркетплейс: wb | ozon"),
+        ("[].name",            "string",        "Название магазина"),
+        ("[].status",          "string (enum)", "Статус: draft | active | error | disabled"),
+        ("[].autoUpdateEnabled","bool",          "Автоматическое обновление цен включено"),
+        ("[].scheduleCron",    "string",        "Cron-расписание пересчёта"),
+        ("[].lastCheckedAt",   "string|null",   "Время последней проверки подключения (UTC)"),
+        ("[].createdAt",       "string (RFC 3339)", "Дата создания (UTC)"),
+    ],
+    error_codes=[
+        (401, "unauthorized", "Сессия отсутствует или истекла"),
+    ],
+)
+
+add_endpoint(
+    doc, "GET", "/api/shops/:id",
+    summary="Получение одного магазина",
+    auth_required=True, csrf_required=False,
+    description="Возвращает магазин по UUID. Доступен только владельцу.",
+    request_fields=[
+        (":id", "string (UUID, path)", "Идентификатор магазина"),
+    ],
+    response_fields=[
+        ("id",               "string (UUID)", "Идентификатор магазина"),
+        ("marketplace",      "string (enum)", "Маркетплейс: wb | ozon"),
+        ("name",             "string",        "Название магазина"),
+        ("status",           "string (enum)", "Статус: draft | active | error | disabled"),
+        ("autoUpdateEnabled","bool",          "Автоматическое обновление цен включено"),
+        ("scheduleCron",     "string",        "Cron-расписание пересчёта"),
+        ("lastCheckedAt",    "string|null",   "Время последней проверки подключения (UTC)"),
+        ("createdAt",        "string (RFC 3339)", "Дата создания (UTC)"),
+    ],
+    error_codes=[
+        (400, "bad_request",  "Некорректный формат UUID"),
+        (401, "unauthorized", "Сессия отсутствует или истекла"),
+        (404, "shop_not_found", "Магазин не найден или не принадлежит пользователю"),
+    ],
+)
+
+add_endpoint(
+    doc, "POST", "/api/shops",
+    summary="Создание нового магазина",
+    auth_required=True, csrf_required=True,
+    description=(
+        "Создаёт магазин со статусом draft. "
+        "Поле credentials передаётся в открытом виде в теле запроса — "
+        "сервер шифрует его AES-256-GCM перед сохранением. "
+        "Для WB: {\"api_key\": \"...\"}, для Ozon: {\"client_id\": \"...\", \"api_key\": \"...\"}."
+    ),
+    request_fields=[
+        ("marketplace", "string", "Маркетплейс: wb | ozon (обязательное)"),
+        ("name",        "string", "Название магазина (обязательное)"),
+        ("credentials", "object", "Учётные данные маркетплейса — структура зависит от marketplace (обязательное)"),
+    ],
+    response_fields=[
+        ("id",          "string (UUID)", "Идентификатор созданного магазина"),
+        ("marketplace", "string",        "Маркетплейс"),
+        ("name",        "string",        "Название"),
+        ("status",      "string",        "Всегда draft при создании"),
+        ("createdAt",   "string (RFC 3339)", "Дата создания (UTC)"),
+    ],
+    error_codes=[
+        (400, "bad_request",        "Отсутствует обязательное поле"),
+        (400, "invalid_marketplace","Неизвестный маркетплейс"),
+        (401, "unauthorized",       "Сессия отсутствует или истекла"),
+        (500, "internal_error",     "Внутренняя ошибка сервера"),
+    ],
+    notes=["HTTP 201 Created при успехе.", "Требует заголовок Origin (CSRF)."],
+)
+
+add_endpoint(
+    doc, "PATCH", "/api/shops/:id",
+    summary="Обновление магазина",
+    auth_required=True, csrf_required=True,
+    description=(
+        "Частичное обновление (все поля опциональны). "
+        "Если передаётся credentials — перешифровывается. "
+        "Поля, не переданные в теле, остаются без изменений."
+    ),
+    request_fields=[
+        ("name",               "string (optional)",  "Новое название"),
+        ("credentials",        "object (optional)",  "Новые учётные данные (будут перешифрованы)"),
+        ("autoUpdateEnabled",  "bool (optional)",    "Включить/выключить авто-обновление цен"),
+        ("scheduleCron",       "string (optional)",  "Новое cron-расписание (например: 0 */6 * * *)"),
+    ],
+    response_fields=[
+        ("id",               "string (UUID)", "Идентификатор магазина"),
+        ("marketplace",      "string",        "Маркетплейс"),
+        ("name",             "string",        "Обновлённое название"),
+        ("status",           "string",        "Текущий статус"),
+        ("autoUpdateEnabled","bool",          "Флаг автообновления"),
+        ("scheduleCron",     "string",        "Cron-расписание"),
+        ("updatedAt",        "string (RFC 3339)", "Дата обновления (UTC)"),
+    ],
+    error_codes=[
+        (400, "bad_request",  "Некорректный формат запроса"),
+        (401, "unauthorized", "Сессия отсутствует или истекла"),
+        (404, "shop_not_found", "Магазин не найден"),
+        (500, "internal_error", "Внутренняя ошибка сервера"),
+    ],
+    notes=["Требует заголовок Origin (CSRF)."],
+)
+
+add_endpoint(
+    doc, "DELETE", "/api/shops/:id",
+    summary="Удаление магазина",
+    auth_required=True, csrf_required=True,
+    description="Безвозвратно удаляет магазин и все связанные данные (ON DELETE CASCADE в БД).",
+    request_fields=[
+        (":id", "string (UUID, path)", "Идентификатор магазина"),
+    ],
+    response_fields=[],
+    error_codes=[
+        (400, "bad_request",   "Некорректный формат UUID"),
+        (401, "unauthorized",  "Сессия отсутствует или истекла"),
+        (404, "shop_not_found","Магазин не найден"),
+    ],
+    notes=["HTTP 204 No Content при успехе.", "Требует заголовок Origin (CSRF)."],
+)
+
+add_endpoint(
+    doc, "POST", "/api/shops/:id/test",
+    summary="Проверка подключения к маркетплейсу",
+    auth_required=True, csrf_required=True,
+    description=(
+        "Расшифровывает сохранённые credentials, создаёт клиент маркетплейса и "
+        "вызывает TestAuth. Обновляет статус магазина: active при успехе, error при ошибке. "
+        "Результат записывается в таблицу integration_log."
+    ),
+    request_fields=[
+        (":id", "string (UUID, path)", "Идентификатор магазина"),
+    ],
+    response_fields=[
+        ("status", "string", "active — подключение успешно"),
+    ],
+    error_codes=[
+        (400, "bad_request",        "Некорректный формат UUID"),
+        (401, "unauthorized",       "Сессия отсутствует или истекла"),
+        (404, "shop_not_found",     "Магазин не найден"),
+        (422, "auth_failed",        "Маркетплейс отклонил API-ключ (статус магазина → error)"),
+        (500, "internal_error",     "Внутренняя ошибка сервера"),
+    ],
+    notes=["Требует заголовок Origin (CSRF).", "Каждый вызов создаёт запись в integration_log."],
+)
+
+# ── 4. Планируемые эндпоинты ──────────────────────────────────────────────────
+heading1(doc, "4. Планируемые эндпоинты (в разработке)")
 
 doc.add_paragraph(
     "Следующие группы эндпоинтов будут добавлены по мере реализации этапов плана разработки. "
@@ -434,7 +596,6 @@ doc.add_paragraph(
 )
 
 planned = [
-    ("Этап 2 — Магазины",          "/api/shops",            "CRUD магазинов, тест подключения к WB/Ozon"),
     ("Этап 3 — Каталог SKU",       "/api/products",         "Импорт, ручное добавление, поиск, редактирование"),
     ("Этап 4 — Стратегии",         "/api/strategies",       "CRUD стратегий, назначение на SKU"),
     ("Этап 5 — Расчёт цен",        "/api/pricing",          "Симуляция и формирование плана изменений"),
