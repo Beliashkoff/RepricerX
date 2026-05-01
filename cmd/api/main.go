@@ -12,12 +12,16 @@ import (
 	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/config"
+	"github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/Beliashkoff/RepricerX/internal/integration/ozon"
+	"github.com/Beliashkoff/RepricerX/internal/integration/wildberries"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redischeck"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-migrate/migrate/v4"
@@ -63,6 +67,8 @@ func main() {
 	usersRepo := repository.NewUsersRepository(pool)
 	sessionsRepo := repository.NewSessionsRepository(pool)
 	verRepo := repository.NewEmailVerificationsRepository(pool)
+	shopsRepo := repository.NewShopsRepository(pool)
+	intLogRepo := repository.NewIntegrationLogRepository(pool)
 
 	audit := auditlog.New(log)
 
@@ -72,6 +78,15 @@ func main() {
 	} else {
 		m = mailer.NewLogMailer(log)
 	}
+
+	shopService := shopsvc.New(shopsRepo, intLogRepo, cfg.AppSecretKey, map[string]shopsvc.MarketplaceFactory{
+		"wb": func(b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(b)
+		},
+		"ozon": func(b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(b)
+		},
+	})
 
 	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, m, audit, authsvc.Config{
 		IdleTTL:         24 * time.Hour,
@@ -104,6 +119,7 @@ func main() {
 
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
+		ShopSvc:        shopService,
 		Audit:          audit,
 		AllowedOrigins: cfg.AllowedOrigins,
 		TrustProxy:     cfg.TrustProxyHeaders,
@@ -128,6 +144,12 @@ func main() {
 				log.Error("cleanup: expired verifications", "error", err)
 			} else if n > 0 {
 				log.Info("cleanup: удалены токены верификации", "count", n)
+			}
+			n, err = intLogRepo.DeleteOlderThan(context.Background(), time.Now().UTC().Add(-30*24*time.Hour))
+			if err != nil {
+				log.Error("cleanup: integration_log", "error", err)
+			} else if n > 0 {
+				log.Info("cleanup: удалены записи integration_log", "count", n)
 			}
 		}
 	}()

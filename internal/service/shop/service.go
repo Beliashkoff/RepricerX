@@ -1,0 +1,200 @@
+// Package shop реализует бизнес-логику управления магазинами маркетплейсов.
+package shop
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/Beliashkoff/RepricerX/internal/domain"
+	"github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/crypto"
+	"github.com/Beliashkoff/RepricerX/internal/repository"
+	"github.com/google/uuid"
+)
+
+var (
+	ErrShopNotFound       = errors.New("shop not found")
+	ErrInvalidMarketplace = errors.New("invalid marketplace")
+	ErrAuthFailed         = errors.New("marketplace auth failed")
+)
+
+// MarketplaceFactory создаёт клиент маркетплейса из JSON-credentials.
+type MarketplaceFactory func(credsJSON []byte) (integration.Marketplace, error)
+
+// UpdatePatch содержит изменяемые поля магазина (nil = не менять).
+type UpdatePatch struct {
+	Name              *string
+	Credentials       json.RawMessage
+	AutoUpdateEnabled *bool
+	ScheduleCron      *string
+}
+
+type Service struct {
+	shops     repository.ShopsRepository
+	intLog    repository.IntegrationLogRepository
+	secret    string
+	factories map[string]MarketplaceFactory
+}
+
+func New(
+	shops repository.ShopsRepository,
+	intLog repository.IntegrationLogRepository,
+	secret string,
+	factories map[string]MarketplaceFactory,
+) *Service {
+	return &Service{
+		shops:     shops,
+		intLog:    intLog,
+		secret:    secret,
+		factories: factories,
+	}
+}
+
+// Create создаёт новый магазин со статусом draft.
+// credsJSON — незашифрованный JSON с учётными данными (WBCredentials / OzonCredentials).
+func (s *Service) Create(ctx context.Context, userID uuid.UUID, marketplace, name string, credsJSON json.RawMessage) (*domain.Shop, error) {
+	if _, ok := s.factories[marketplace]; !ok {
+		return nil, ErrInvalidMarketplace
+	}
+
+	encrypted, err := crypto.Encrypt(credsJSON, s.secret)
+	if err != nil {
+		return nil, fmt.Errorf("shop create: encrypt: %w", err)
+	}
+
+	now := time.Now().UTC()
+	shop := &domain.Shop{
+		ID:                   uuid.New(),
+		UserID:               userID,
+		Marketplace:          marketplace,
+		Name:                 name,
+		CredentialsEncrypted: encrypted,
+		Status:               domain.ShopStatusDraft,
+		AutoUpdateEnabled:    false,
+		ScheduleCron:         "0 3 * * *",
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+
+	if err := s.shops.Create(ctx, shop); err != nil {
+		return nil, fmt.Errorf("shop create: %w", err)
+	}
+	return shop, nil
+}
+
+// List возвращает все магазины пользователя.
+func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]*domain.Shop, error) {
+	shops, err := s.shops.ListByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("shop list: %w", err)
+	}
+	return shops, nil
+}
+
+// Get возвращает магазин по ID (только если принадлежит пользователю).
+func (s *Service) Get(ctx context.Context, userID, shopID uuid.UUID) (*domain.Shop, error) {
+	shop, err := s.shops.GetByID(ctx, shopID, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrShopNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("shop get: %w", err)
+	}
+	return shop, nil
+}
+
+// Update изменяет поля магазина согласно патчу.
+func (s *Service) Update(ctx context.Context, userID, shopID uuid.UUID, patch UpdatePatch) (*domain.Shop, error) {
+	shop, err := s.Get(ctx, userID, shopID)
+	if err != nil {
+		return nil, err
+	}
+
+	if patch.Name != nil {
+		shop.Name = *patch.Name
+	}
+	if len(patch.Credentials) > 0 {
+		if _, ok := s.factories[shop.Marketplace]; !ok {
+			return nil, ErrInvalidMarketplace
+		}
+		encrypted, err := crypto.Encrypt(patch.Credentials, s.secret)
+		if err != nil {
+			return nil, fmt.Errorf("shop update: encrypt: %w", err)
+		}
+		shop.CredentialsEncrypted = encrypted
+	}
+	if patch.AutoUpdateEnabled != nil {
+		shop.AutoUpdateEnabled = *patch.AutoUpdateEnabled
+	}
+	if patch.ScheduleCron != nil {
+		shop.ScheduleCron = *patch.ScheduleCron
+	}
+	shop.UpdatedAt = time.Now().UTC()
+
+	if err := s.shops.Update(ctx, shop); err != nil {
+		return nil, fmt.Errorf("shop update: %w", err)
+	}
+	return shop, nil
+}
+
+// Delete удаляет магазин.
+func (s *Service) Delete(ctx context.Context, userID, shopID uuid.UUID) error {
+	err := s.shops.Delete(ctx, shopID, userID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrShopNotFound
+	}
+	return err
+}
+
+// TestConnection проверяет подключение к маркетплейсу и обновляет статус магазина.
+func (s *Service) TestConnection(ctx context.Context, userID, shopID uuid.UUID) error {
+	shop, err := s.Get(ctx, userID, shopID)
+	if err != nil {
+		return err
+	}
+
+	factory, ok := s.factories[shop.Marketplace]
+	if !ok {
+		return ErrInvalidMarketplace
+	}
+
+	credsJSON, err := crypto.Decrypt(shop.CredentialsEncrypted, s.secret)
+	if err != nil {
+		return fmt.Errorf("shop test: decrypt: %w", err)
+	}
+
+	client, err := factory(credsJSON)
+	if err != nil {
+		return fmt.Errorf("shop test: build client: %w", err)
+	}
+
+	corrID := uuid.New()
+	testErr := client.TestAuth(ctx)
+	now := time.Now().UTC()
+
+	newStatus := domain.ShopStatusActive
+	logEntry := &domain.IntegrationLogEntry{
+		ID:            uuid.New(),
+		ShopID:        &shop.ID,
+		Operation:     "test_auth",
+		CorrelationID: corrID,
+		CreatedAt:     now,
+	}
+
+	if testErr != nil {
+		newStatus = domain.ShopStatusError
+		errText := testErr.Error()
+		logEntry.ErrorText = errText
+		if errors.Is(testErr, integration.ErrUnauthorized) {
+			testErr = ErrAuthFailed
+		}
+	}
+
+	_ = s.shops.UpdateStatus(ctx, shop.ID, newStatus, now)
+	_ = s.intLog.Create(ctx, logEntry)
+
+	return testErr
+}

@@ -54,3 +54,22 @@ type EmailVerificationsRepository interface {
 	InvalidatePending(ctx context.Context, userID uuid.UUID) error
 	DeleteExpired(ctx context.Context) (int64, error)
 }
+
+// ShopsRepository — операции с таблицей shops.
+type ShopsRepository interface {
+	Create(ctx context.Context, shop *domain.Shop) error
+	// GetByID возвращает магазин только если он принадлежит userID.
+	GetByID(ctx context.Context, id, userID uuid.UUID) (*domain.Shop, error)
+	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.Shop, error)
+	Update(ctx context.Context, shop *domain.Shop) error
+	// Delete удаляет магазин только если он принадлежит userID.
+	Delete(ctx context.Context, id, userID uuid.UUID) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string, checkedAt time.Time) error
+}
+
+// IntegrationLogRepository — операции с таблицей integration_log.
+type IntegrationLogRepository interface {
+	Create(ctx context.Context, e *domain.IntegrationLogEntry) error
+	// DeleteOlderThan удаляет записи старше cutoff; возвращает число удалённых строк.
+	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
