@@ -16,7 +16,7 @@ WORKDIR /app
 # RUN npm run build
 
 # Placeholder — минимальный index.html пока нет фронтенда
-RUN mkdir -p dist && printf '<!DOCTYPE html>\n<html lang="ru">\n<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AutoPrice</title></head>\n<body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">\n<div style="text-align:center"><h1>AutoPrice</h1><p>Frontend в разработке. API работает.</p><a href="/healthz">/healthz</a></div>\n</body></html>\n' > dist/index.html
+RUN mkdir -p dist && printf '<!DOCTYPE html>\n<html lang="ru">\n<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RepricerX</title></head>\n<body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">\n<div style="text-align:center"><h1>RepricerX</h1><p>Frontend в разработке. API работает.</p><a href="/healthz">/healthz</a></div>\n</body></html>\n' > dist/index.html
 
 FROM alpine:3.21
 
