@@ -116,7 +116,7 @@ func TestUsersRepo_FailedLoginTracking(t *testing.T) {
 	}
 	repo.Create(ctx, user)
 
-	lockout := time.Now().Add(15 * time.Minute)
+	lockout := time.Now().UTC().Add(15 * time.Minute)
 	if err := repo.RegisterFailedLogin(ctx, user.ID, 3, &lockout); err != nil {
 		t.Fatalf("RegisterFailedLogin: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestSessionsRepo_CreateAndGet(t *testing.T) {
 	usersRepo.Create(ctx, user)
 
 	_, hashHex, _ := token.Generate()
-	now := time.Now()
+	now := time.Now().UTC()
 	sess := &domain.Session{
 		ID:                uuid.New(),
 		UserID:            user.ID,
@@ -214,7 +214,9 @@ func TestSessionsRepo_ExpiredSession(t *testing.T) {
 	usersRepo.Create(ctx, user)
 
 	_, hashHex, _ := token.Generate()
-	past := time.Now().Add(-time.Hour)
+	// Use UTC explicitly: TIMESTAMP column has no timezone info,
+	// so comparing with Postgres now() (always UTC) requires UTC input.
+	past := time.Now().UTC().UTC().Add(-time.Hour)
 	sess := &domain.Session{
 		ID:                uuid.New(),
 		UserID:            user.ID,
@@ -247,7 +249,7 @@ func TestSessionsRepo_DeleteByTokenHash(t *testing.T) {
 	usersRepo.Create(ctx, user)
 
 	_, hashHex, _ := token.Generate()
-	now := time.Now()
+	now := time.Now().UTC()
 	sessRepo.Create(ctx, &domain.Session{
 		ID:                uuid.New(),
 		UserID:            user.ID,
@@ -281,7 +283,7 @@ func TestSessionsRepo_TouchIdleIfNeeded(t *testing.T) {
 
 	// Session expiring in 6 hours (< 12h threshold → should be extended)
 	_, hashHex, _ := token.Generate()
-	now := time.Now()
+	now := time.Now().UTC()
 	sessID := uuid.New()
 	sessRepo.Create(ctx, &domain.Session{
 		ID:                sessID,
@@ -316,7 +318,7 @@ func TestSessionsRepo_TouchIdleNotNeeded(t *testing.T) {
 
 	// Session expiring in 20 hours (> 12h threshold → should NOT be extended)
 	_, hashHex, _ := token.Generate()
-	now := time.Now()
+	now := time.Now().UTC()
 	sessID := uuid.New()
 	sessRepo.Create(ctx, &domain.Session{
 		ID:                sessID,
@@ -352,7 +354,7 @@ func TestEmailVerificationsRepo_CreateAndGet(t *testing.T) {
 	usersRepo.Create(ctx, user)
 
 	plaintext, hashHex, _ := token.Generate()
-	expiresAt := time.Now().Add(24 * time.Hour)
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
 	if err := verRepo.Create(ctx, user.ID, hashHex, expiresAt); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -389,7 +391,7 @@ func TestEmailVerificationsRepo_InvalidatePending(t *testing.T) {
 	usersRepo.Create(ctx, user)
 
 	_, hashHex, _ := token.Generate()
-	verRepo.Create(ctx, user.ID, hashHex, time.Now().Add(time.Hour))
+	verRepo.Create(ctx, user.ID, hashHex, time.Now().UTC().Add(time.Hour))
 
 	if err := verRepo.InvalidatePending(ctx, user.ID); err != nil {
 		t.Fatalf("InvalidatePending: %v", err)

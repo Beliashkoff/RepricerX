@@ -11,7 +11,6 @@ import (
 )
 
 // RequireAuth проверяет сессию и кладёт user/session в context.
-// Логика по плану п. 14 (см. CLAUDE.md):
 //  1. Cookie есть → hash → GetByTokenHash (фильтр по TTL в SQL).
 //  2. Пользователь active → fingerprint-check (мягкий лог).
 //  3. Условное продление idle TTL → Set-Cookie только при фактическом обновлении.
