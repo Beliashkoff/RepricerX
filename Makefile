@@ -1,4 +1,4 @@
-.PHONY: up down build build-worker migrate test test-integration lint \
+.PHONY: up down build build-worker migrate test test-integration lint swag \
         prod-up prod-down prod-logs prod-ps
 
 # --- dev ---
@@ -30,6 +30,10 @@ test-integration:
 
 lint:
 	golangci-lint run ./...
+
+# Регенерирует docs/ из аннотаций. Запускать после изменения хендлеров.
+swag:
+	swag init -g cmd/api/main.go -o docs
 
 # --- production (запускать на сервере или через SSH) ---
 

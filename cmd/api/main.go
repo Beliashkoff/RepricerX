@@ -1,3 +1,29 @@
+// Package main — точка входа RepricerX API.
+//
+//	@title			RepricerX API
+//	@version		1.0
+//	@description	REST API сервиса автоматического управления ценами на маркетплейсах Wildberries и Ozon.
+//	@description
+//	@description	## Аутентификация
+//	@description	После успешного входа (POST /api/auth/login) сервер устанавливает HttpOnly-cookie `rx_session`.
+//	@description	Браузер отправляет его автоматически; при работе через curl/Postman передавайте `-b "rx_session=<token>"`.
+//	@description
+//	@description	## CSRF-защита
+//	@description	Все мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`
+//	@description	и `/api/auth/verification/resend`, проверяют заголовок `Origin`.
+//	@description	Он должен совпадать с одним из разрешённых источников (настраивается через `ALLOWED_ORIGINS`).
+//	@description	Swagger UI выставляет `Origin` автоматически.
+//
+//	@contact.name	Akim Zuev
+//	@contact.email	akim.zuev.86@gmail.com
+//
+//	@host		localhost:8080
+//	@BasePath	/
+//
+//	@securityDefinitions.apikey	SessionCookie
+//	@in							cookie
+//	@name						rx_session
+//	@description				Сессионный cookie, выставляемый при логине (POST /api/auth/login).
 package main
 
 import (
@@ -11,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/Beliashkoff/RepricerX/docs"
 	"github.com/Beliashkoff/RepricerX/internal/config"
 	"github.com/Beliashkoff/RepricerX/internal/integration"
 	"github.com/Beliashkoff/RepricerX/internal/integration/ozon"
@@ -102,20 +129,9 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	r.GET("/healthz", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-	r.GET("/ready", func(c *gin.Context) {
-		if err := pool.Ping(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "db unavailable"})
-			return
-		}
-		if err := redischeck.Ping(c.Request.Context(), cfg.RedisAddr); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "redis unavailable"})
-			return
-		}
-		c.Status(http.StatusOK)
-	})
+	health := &healthHandlers{pool: pool, redisAddr: cfg.RedisAddr}
+	r.GET("/healthz", health.healthz)
+	r.GET("/ready", health.ready)
 
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,

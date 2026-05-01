@@ -1,6 +1,9 @@
 package transport
 
 import (
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -25,6 +28,9 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 
 	requireAuth := RequireAuth(cfg.AuthSvc, cfg.Audit, cfg.TrustProxy, cfg.SecureCookie)
 	requireCSRF := RequireSameOrigin(cfg.AllowedOrigins, cfg.Audit, cfg.TrustProxy)
+
+	// Swagger UI: /swagger/index.html
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// Публичные auth-эндпоинты — без RequireAuth и без CSRF.
 	public := r.Group("/api/auth")

@@ -1,0 +1,660 @@
+basePath: /
+definitions:
+  transport.createShopRequest:
+    properties:
+      credentials:
+        type: object
+      marketplace:
+        example: wb
+        type: string
+      name:
+        example: Мой магазин на WB
+        type: string
+    required:
+    - credentials
+    - marketplace
+    - name
+    type: object
+  transport.errorDetail:
+    properties:
+      code:
+        example: invalid_credentials
+        type: string
+      message:
+        example: Неверный email или пароль
+        type: string
+    type: object
+  transport.errorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/transport.errorDetail'
+    type: object
+  transport.loginRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+      password:
+        example: MyP@ssword123
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  transport.loginResponse:
+    properties:
+      displayName:
+        example: Иван Петров
+        type: string
+      email:
+        example: user@example.com
+        type: string
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+    type: object
+  transport.meResponse:
+    properties:
+      createdAt:
+        type: string
+      displayName:
+        example: Иван Петров
+        type: string
+      email:
+        example: user@example.com
+        type: string
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      status:
+        example: active
+        type: string
+    type: object
+  transport.registerRequest:
+    properties:
+      displayName:
+        example: Иван Петров
+        type: string
+      email:
+        example: user@example.com
+        type: string
+      password:
+        example: MyP@ssword123
+        type: string
+    required:
+    - displayName
+    - email
+    - password
+    type: object
+  transport.registerResponse:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    type: object
+  transport.resendRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    required:
+    - email
+    type: object
+  transport.shopResponse:
+    properties:
+      autoUpdateEnabled:
+        example: false
+        type: boolean
+      createdAt:
+        type: string
+      id:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+      lastCheckedAt:
+        type: string
+      marketplace:
+        example: wb
+        type: string
+      name:
+        example: Мой магазин на WB
+        type: string
+      scheduleCron:
+        example: 0 */4 * * *
+        type: string
+      status:
+        example: active
+        type: string
+    type: object
+  transport.testConnectionResponse:
+    properties:
+      status:
+        example: active
+        type: string
+    type: object
+  transport.updateMeRequest:
+    properties:
+      displayName:
+        example: Новое Имя
+        type: string
+    required:
+    - displayName
+    type: object
+  transport.updateShopRequest:
+    properties:
+      autoUpdateEnabled:
+        example: true
+        type: boolean
+      credentials:
+        type: object
+      name:
+        example: Новое название
+        type: string
+      scheduleCron:
+        example: 0 */4 * * *
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: akim.zuev.86@gmail.com
+    name: Akim Zuev
+  description: |-
+    REST API сервиса автоматического управления ценами на маркетплейсах Wildberries и Ozon.
+
+    ## Аутентификация
+    После успешного входа (POST /api/auth/login) сервер устанавливает HttpOnly-cookie `rx_session`.
+    Браузер отправляет его автоматически; при работе через curl/Postman передавайте `-b "rx_session=<token>"`.
+
+    ## CSRF-защита
+    Все мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`
+    и `/api/auth/verification/resend`, проверяют заголовок `Origin`.
+    Он должен совпадать с одним из разрешённых источников (настраивается через `ALLOWED_ORIGINS`).
+    Swagger UI выставляет `Origin` автоматически.
+  title: RepricerX API
+  version: "1.0"
+paths:
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Проверяет email и пароль. При успехе создаёт сессию и устанавливает HttpOnly-cookie `rx_session`.
+        Аккаунт должен быть активирован (email подтверждён через письмо).
+        После 5 неудачных попыток аккаунт блокируется на 15 минут.
+      parameters:
+      - description: Учётные данные
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Успешный вход, cookie rx_session выставлен
+          schema:
+            $ref: '#/definitions/transport.loginResponse'
+        "401":
+          description: 'Неверные учётные данные или аккаунт не активирован (код: invalid_credentials)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: 'Аккаунт заблокирован (код: user_blocked)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      summary: Вход
+      tags:
+      - auth
+  /api/auth/logout:
+    post:
+      description: |-
+        Завершает текущую сессию, инвалидирует cookie `rx_session`.
+        Требует валидной сессии и совпадения заголовка Origin (CSRF-защита).
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Сессия завершена
+        "401":
+          description: Сессия не найдена или истекла
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: CSRF — Origin не совпадает с разрешёнными
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Выход
+      tags:
+      - auth
+  /api/auth/me:
+    get:
+      description: 'Возвращает данные аутентифицированного пользователя: id, email,
+        displayName, статус, дату регистрации.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/transport.meResponse'
+        "401":
+          description: Сессия отсутствует или истекла
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Профиль текущего пользователя
+      tags:
+      - auth
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        Изменяет отображаемое имя (displayName) текущего пользователя.
+        Требует валидной сессии и совпадения Origin (CSRF-защита).
+      parameters:
+      - description: Новое отображаемое имя
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.updateMeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Обновлённые данные пользователя
+          schema:
+            $ref: '#/definitions/transport.loginResponse'
+        "400":
+          description: Неверный формат запроса
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Не аутентифицирован
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: CSRF — Origin не совпадает
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Обновить профиль
+      tags:
+      - auth
+  /api/auth/register:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Создаёт нового пользователя. На указанный email отправляется письмо для подтверждения.
+        Войти можно только после перехода по ссылке из письма (активация аккаунта).
+      parameters:
+      - description: Данные для регистрации
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.registerRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Пользователь создан, письмо отправлено
+          schema:
+            $ref: '#/definitions/transport.registerResponse'
+        "400":
+          description: 'Неверный формат запроса, некорректный email или слабый пароль
+            (код: bad_request / invalid_email / weak_password)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "409":
+          description: 'Email уже зарегистрирован (код: email_taken)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      summary: Регистрация
+      tags:
+      - auth
+  /api/auth/verification/resend:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Отправляет новое письмо с токеном верификации.
+        Всегда возвращает 202 — сервер не раскрывает, существует ли аккаунт с таким email (защита от перебора).
+      parameters:
+      - description: Email пользователя
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.resendRequest'
+      responses:
+        "202":
+          description: Письмо отправлено (или будет отправлено, если email зарегистрирован)
+      summary: Повторная отправка письма
+      tags:
+      - auth
+  /api/auth/verify:
+    get:
+      description: |-
+        Принимает одноразовый токен из письма, активирует аккаунт и перенаправляет на фронтенд.
+        При успехе — редирект на `/login?verified=1`, при ошибке или истёкшем токене — на `/login?verified=0`.
+      parameters:
+      - description: Одноразовый токен из письма (plaintext)
+        in: query
+        name: token
+        required: true
+        type: string
+      responses:
+        "302":
+          description: Редирект на фронтенд с verified=0 (токен не найден, уже использован
+            или истёк)
+      summary: Подтверждение email
+      tags:
+      - auth
+  /api/shops:
+    get:
+      description: Возвращает все магазины, принадлежащие аутентифицированному пользователю.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/transport.shopResponse'
+            type: array
+        "401":
+          description: Сессия отсутствует или истекла
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Список магазинов
+      tags:
+      - shops
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Создаёт новый магазин, сохраняет API-ключи в зашифрованном виде (AES-GCM).
+
+        Формат поля `credentials` зависит от маркетплейса:
+        - **wb** (Wildberries): `{"token": "<API-токен>"}`
+        Токен можно получить в личном кабинете WB: Настройки → Доступ к API.
+        - **ozon**: `{"client_id": "<Client-ID>", "api_key": "<API-ключ>"}`
+        Ключи доступны в кабинете Ozon Seller: Настройки → API-ключи.
+      parameters:
+      - description: Данные нового магазина
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.createShopRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Магазин создан
+          schema:
+            $ref: '#/definitions/transport.shopResponse'
+        "400":
+          description: 'Неверный формат или неизвестный маркетплейс (код: bad_request
+            / invalid_marketplace)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Не аутентифицирован
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: CSRF — Origin не совпадает
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Подключить магазин
+      tags:
+      - shops
+  /api/shops/{id}:
+    delete:
+      description: |-
+        Удаляет магазин и все связанные данные.
+        Если за последние 30 дней есть записи в журнале изменений цен — операция будет отклонена.
+      parameters:
+      - description: UUID магазина
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Магазин удалён
+        "400":
+          description: Неверный формат UUID
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Не аутентифицирован
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: CSRF — Origin не совпадает
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Магазин не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Удалить магазин
+      tags:
+      - shops
+    get:
+      description: Возвращает магазин по UUID. Доступен только владельцу.
+      parameters:
+      - description: UUID магазина
+        example: 550e8400-e29b-41d4-a716-446655440000
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/transport.shopResponse'
+        "400":
+          description: Неверный формат UUID
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Не аутентифицирован
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: 'Магазин не найден (код: shop_not_found)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Получить магазин
+      tags:
+      - shops
+    patch:
+      consumes:
+      - application/json
+      description: |-
+        Изменяет имя, учётные данные и/или настройки автообновления и расписания.
+        Все поля опциональны — передавайте только то, что хотите изменить.
+
+        Поле `scheduleCron` задаёт расписание пересчёта цен в формате cron (5 полей).
+        Примеры: `"0 * * * *"` — каждый час, `"0 */4 * * *"` — каждые 4 часа.
+      parameters:
+      - description: UUID магазина
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Обновляемые поля
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.updateShopRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/transport.shopResponse'
+        "400":
+          description: Неверный формат
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Не аутентифицирован
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: CSRF или нет доступа к магазину
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Магазин не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Обновить магазин
+      tags:
+      - shops
+  /api/shops/{id}/test:
+    post:
+      description: |-
+        Выполняет тестовый запрос к API маркетплейса с сохранёнными учётными данными.
+        При успехе статус магазина становится `active`, при ошибке авторизации — `error`.
+        Результат проверки фиксируется в поле `lastCheckedAt`.
+      parameters:
+      - description: UUID магазина
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Подключение успешно
+          schema:
+            $ref: '#/definitions/transport.testConnectionResponse'
+        "400":
+          description: Неверный формат UUID
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Не аутентифицирован
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: CSRF — Origin не совпадает
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Магазин не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "422":
+          description: 'Ошибка авторизации в маркетплейсе (код: auth_failed)'
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Проверить подключение к маркетплейсу
+      tags:
+      - shops
+  /healthz:
+    get:
+      description: Возвращает 200, если процесс запущен. Не проверяет зависимости.
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: OK
+      summary: Liveness probe
+      tags:
+      - system
+  /ready:
+    get:
+      description: |-
+        Возвращает 200, если Postgres и Redis доступны.
+        При недоступности любого из них — 503 с описанием причины.
+        Используется как healthcheck в Docker Compose и CI.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+        "503":
+          description: db unavailable / redis unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness probe
+      tags:
+      - system
+securityDefinitions:
+  SessionCookie:
+    description: Сессионный cookie, выставляемый при логине (POST /api/auth/login).
+    in: cookie
+    name: rx_session
+    type: apiKey
+swagger: "2.0"
