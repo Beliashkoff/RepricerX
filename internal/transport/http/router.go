@@ -1,33 +1,43 @@
 package transport
 
 import (
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
+	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
+	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // RouterConfig — все зависимости, нужные для регистрации маршрутов.
 type RouterConfig struct {
 	AuthSvc        *auth.Service
 	ShopSvc        *shopsvc.Service
+	UsersRepo      repository.UsersRepository
 	Audit          *auditlog.Logger
 	AllowedOrigins []string
 	TrustProxy     bool
-	SecureCookie   bool   // true в prod
-	FrontendURL    string // куда редиректить после email-verify
+	SecureCookie bool   // true в prod
+	FrontendURL  string // куда редиректить после email-verify
 }
 
 // RegisterRoutes регистрирует все HTTP-маршруты приложения на переданном engine.
 func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
+	// CORS для фронтенда (Vite dev server + prod).
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     cfg.AllowedOrigins,
+		AllowMethods:     []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
+
 	authH := NewAuthHandler(cfg.AuthSvc, cfg.SecureCookie, cfg.FrontendURL)
 	shopH := NewShopHandler(cfg.ShopSvc)
-
-	requireAuth := RequireAuth(cfg.AuthSvc, cfg.Audit, cfg.TrustProxy, cfg.SecureCookie)
-	requireCSRF := RequireSameOrigin(cfg.AllowedOrigins, cfg.Audit, cfg.TrustProxy)
 
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -41,15 +51,15 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		public.POST("/verification/resend", authH.ResendVerification)
 	}
 
-	// Защищённые эндпоинты — обязательна валидная сессия.
+	requireAuth := RequireAuth(cfg.AuthSvc, cfg.Audit, cfg.TrustProxy, cfg.SecureCookie)
+	requireCSRF := RequireSameOrigin(cfg.AllowedOrigins, cfg.Audit, cfg.TrustProxy)
+
 	protected := r.Group("/api", requireAuth)
 	{
-		// GET не мутирует состояние — CSRF не нужен.
 		protected.GET("/auth/me", authH.Me)
 		protected.GET("/shops", shopH.List)
 		protected.GET("/shops/:id", shopH.Get)
 
-		// Mutating-эндпоинты — дополнительно проверяем Origin.
 		mutating := protected.Group("", requireCSRF)
 		{
 			mutating.POST("/auth/logout", authH.Logout)

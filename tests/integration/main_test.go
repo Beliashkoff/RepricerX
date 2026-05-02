@@ -20,10 +20,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Beliashkoff/RepricerX/internal/integration"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-migrate/migrate/v4"
@@ -42,11 +44,31 @@ const (
 	testName     = "Test User"
 )
 
+// testShopSecret — ключ шифрования credentials в тестах.
+const testShopSecret = "integration-test-secret-key-32b!"
+
 var (
-	testPool   *pgxpool.Pool
-	testSrv    *httptest.Server
-	testMailer *capturingMailer
+	testPool    *pgxpool.Pool
+	testSrv     *httptest.Server
+	testMailer  *capturingMailer
+	testShopSvc *shopsvc.Service
+	// allowAuthFail управляет тем, вернёт ли fakeMarketplace ошибку auth.
+	testShopAuthFail bool
 )
+
+// fakeMarketplace — заглушка адаптера маркетплейса для интеграционных тестов.
+type fakeMarketplace struct{}
+
+func (f *fakeMarketplace) TestAuth(_ context.Context) error {
+	if testShopAuthFail {
+		return integration.ErrUnauthorized
+	}
+	return nil
+}
+func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error) { return nil, nil }
+func (f *fakeMarketplace) UpdatePrices(_ context.Context, _ []integration.PriceUpdate) error {
+	return nil
+}
 
 func TestMain(m *testing.M) {
 	dsn := os.Getenv("DATABASE_URL")
@@ -61,6 +83,16 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	testPool = pool
+
+	fakeFactory := shopsvc.MarketplaceFactory(func(_ []byte) (integration.Marketplace, error) {
+		return &fakeMarketplace{}, nil
+	})
+	testShopSvc = shopsvc.New(
+		repository.NewShopsRepository(pool),
+		repository.NewIntegrationLogRepository(pool),
+		testShopSecret,
+		map[string]shopsvc.MarketplaceFactory{"wb": fakeFactory, "ozon": fakeFactory},
+	)
 
 	testMailer = &capturingMailer{}
 	testSrv = buildServer(pool, testMailer)
@@ -112,6 +144,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 	r.Use(gin.Recovery())
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
+		ShopSvc:        testShopSvc,
 		Audit:          audit,
 		AllowedOrigins: []string{testOrigin},
 		TrustProxy:     false,
@@ -126,9 +159,10 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 func truncate(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(), `
-		TRUNCATE TABLE email_verifications, sessions, users
+		TRUNCATE TABLE integration_log, shops, email_verifications, sessions, users
 		RESTART IDENTITY CASCADE
 	`)
+	testShopAuthFail = false
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

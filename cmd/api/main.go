@@ -136,6 +136,7 @@ func main() {
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        shopService,
+		UsersRepo:      usersRepo,
 		Audit:          audit,
 		AllowedOrigins: cfg.AllowedOrigins,
 		TrustProxy:     cfg.TrustProxyHeaders,

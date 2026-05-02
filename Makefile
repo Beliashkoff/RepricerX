@@ -1,6 +1,10 @@
 .PHONY: up down build build-worker migrate test test-integration lint swag \
         prod-up prod-down prod-logs prod-ps
 
+# Подтягиваем переменные из .env если файл существует
+-include .env
+export
+
 # --- dev ---
 
 up:
