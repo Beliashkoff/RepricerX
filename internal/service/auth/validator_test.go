@@ -58,9 +58,9 @@ func TestValidatePassword(t *testing.T) {
 }
 
 func TestValidatePassword_Boundary(t *testing.T) {
-	// Ровно 12 — граница (валидно)
-	if err := validatePassword("Abcdefghij1!"); err != nil {
-		t.Errorf("12 символов должны проходить: %v", err)
+	// Ровно 8 — граница (валидно)
+	if err := validatePassword("Abcdef1!"); err != nil {
+		t.Errorf("8 символов должны проходить: %v", err)
 	}
 
 	// Ровно 128 — граница (валидно)

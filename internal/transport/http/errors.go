@@ -22,7 +22,7 @@ func handleAuthErr(c *gin.Context, err error) {
 		errResp(c, http.StatusBadRequest, "invalid_email", "Неверный формат email")
 	case auth.ErrWeakPassword:
 		errResp(c, http.StatusBadRequest, "weak_password",
-			"Пароль должен быть от 12 до 128 символов и содержать букву и цифру")
+			"Пароль должен быть от 8 до 128 символов и содержать букву и цифру")
 	case auth.ErrEmailTaken:
 		errResp(c, http.StatusConflict, "email_taken", "Этот email уже зарегистрирован")
 	case auth.ErrInvalidCredentials:

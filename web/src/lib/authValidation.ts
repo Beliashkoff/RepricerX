@@ -1,4 +1,4 @@
-export const passwordRequirementText = 'Пароль должен быть от 12 до 128 символов, содержать букву и цифру'
+export const passwordRequirementText = 'Пароль должен быть от 8 до 128 символов, содержать букву и цифру'
 
 export function isValidEmail(email: string) {
   return /\S+@\S+\.\S+/.test(email)
@@ -6,7 +6,7 @@ export function isValidEmail(email: string) {
 
 export function validatePasswordBasics(password: string) {
   const chars = Array.from(password)
-  if (chars.length < 12 || chars.length > 128) return passwordRequirementText
+  if (chars.length < 8 || chars.length > 128) return passwordRequirementText
 
   const hasLetter = chars.some(char => /\p{L}/u.test(char))
   const hasDigit = chars.some(char => /\p{Nd}/u.test(char))

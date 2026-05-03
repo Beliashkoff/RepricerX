@@ -164,7 +164,9 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 
 		for _, p := range infoResp.Result {
 			price := 0.0
-			_, _ = fmt.Sscanf(p.Price, "%f", &price)
+			if _, err := fmt.Sscanf(p.Price, "%f", &price); err != nil {
+				return nil, fmt.Errorf("ozon: parse price %q for sku %s: %w", p.Price, p.OfferID, err)
+			}
 			skus = append(skus, integration.SKU{
 				ExternalSKU:  p.OfferID,
 				Name:         p.Name,

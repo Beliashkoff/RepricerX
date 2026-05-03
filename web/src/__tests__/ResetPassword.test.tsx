@@ -63,7 +63,7 @@ describe('ResetPassword — валидация', () => {
     await user.type(screen.getByLabelText(/Новый пароль/i), 'short1')
     await user.type(screen.getByLabelText(/Повторите пароль/i), 'short1')
     await user.click(screen.getByRole('button', { name: /Обновить пароль/i }))
-    expect(screen.getAllByText(/Пароль должен быть от 12 до 128 символов/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Пароль должен быть от 8 до 128 символов/i).length).toBeGreaterThan(0)
     expect(mockResetPassword).not.toHaveBeenCalled()
   })
 

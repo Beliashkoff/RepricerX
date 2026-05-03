@@ -138,7 +138,7 @@ export default function ResetPassword() {
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     autoComplete="new-password"
-                    placeholder="Минимум 12 символов"
+                    placeholder="Минимум 8 символов"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     className="pr-10"

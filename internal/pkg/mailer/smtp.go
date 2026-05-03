@@ -90,7 +90,7 @@ func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
 
 	sb.WriteString("From: " + from + "\r\n")
 	sb.WriteString("To: " + to + "\r\n")
-	sb.WriteString("Subject: " + subject + "\r\n")
+	sb.WriteString("Subject: " + sanitizeHeader(subject) + "\r\n")
 	sb.WriteString("MIME-Version: 1.0\r\n")
 	sb.WriteString(`Content-Type: multipart/alternative; boundary="` + boundary + `"` + "\r\n\r\n")
 
@@ -104,4 +104,9 @@ func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
 
 	sb.WriteString("--" + boundary + "--\r\n")
 	return sb.String()
+}
+
+// sanitizeHeader удаляет CR и LF из значения заголовка, предотвращая header injection.
+func sanitizeHeader(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }

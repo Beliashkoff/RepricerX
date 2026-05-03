@@ -20,7 +20,7 @@ func validateEmail(email string) error {
 }
 
 // validatePassword проверяет пароль по OWASP 2024:
-//   - от 12 до 128 символов,
+//   - от 8 до 128 символов,
 //   - содержит хотя бы одну букву и одну цифру,
 //   - без непечатаемых управляющих символов (кроме пробела).
 //
@@ -28,7 +28,7 @@ func validateEmail(email string) error {
 func validatePassword(password string) error {
 	runes := []rune(password)
 	length := len(runes)
-	if length < 12 || length > 128 {
+	if length < 8 || length > 128 {
 		return ErrWeakPassword
 	}
 
