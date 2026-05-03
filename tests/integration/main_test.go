@@ -131,12 +131,14 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 		repository.NewUsersRepository(pool),
 		repository.NewSessionsRepository(pool),
 		repository.NewEmailVerificationsRepository(pool),
+		repository.NewPasswordResetTokensRepository(pool),
 		m,
 		audit,
 		authsvc.Config{
-			IdleTTL:         24 * time.Hour,
-			AbsoluteTTL:     7 * 24 * time.Hour,
-			VerificationURL: testFrontendURL + "/verify",
+			IdleTTL:          24 * time.Hour,
+			AbsoluteTTL:      7 * 24 * time.Hour,
+			VerificationURL:  testFrontendURL + "/verify",
+			PasswordResetURL: testFrontendURL + "/reset-password",
 		},
 	)
 
@@ -159,7 +161,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 func truncate(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(), `
-		TRUNCATE TABLE integration_log, shops, email_verifications, sessions, users
+		TRUNCATE TABLE integration_log, shops, password_reset_tokens, email_verifications, sessions, users
 		RESTART IDENTITY CASCADE
 	`)
 	testShopAuthFail = false
@@ -293,6 +295,25 @@ func (m *capturingMailer) last() *capturedEmail {
 	return &e
 }
 
+func (m *capturingMailer) waitForSubject(t *testing.T, subjectPart string) *capturedEmail {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		for i := len(m.sent) - 1; i >= 0; i-- {
+			if strings.Contains(m.sent[i].subject, subjectPart) {
+				e := m.sent[i]
+				m.mu.Unlock()
+				return &e
+			}
+		}
+		m.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("email with subject containing %q not captured", subjectPart)
+	return nil
+}
+
 func (m *capturingMailer) reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -303,20 +324,37 @@ func (m *capturingMailer) reset() {
 // The text template writes the full verification URL on its own line.
 func extractVerificationToken(t *testing.T, email *capturedEmail) string {
 	t.Helper()
+	return extractTokenFromEmail(t, email)
+}
+
+func extractResetToken(t *testing.T, email *capturedEmail) string {
+	t.Helper()
+	return extractTokenFromEmail(t, email)
+}
+
+func extractTokenFromEmail(t *testing.T, email *capturedEmail) string {
+	t.Helper()
 	for _, line := range strings.Split(email.text, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "http") && strings.Contains(line, "token=") {
 			u, err := url.Parse(line)
 			if err != nil {
-				t.Fatalf("parse verification url %q: %v", line, err)
+				t.Fatalf("parse email url %q: %v", line, err)
 			}
 			tok := u.Query().Get("token")
 			if tok == "" {
-				t.Fatal("token param not found in verification url")
+				fragmentParams, err := url.ParseQuery(u.Fragment)
+				if err != nil {
+					t.Fatalf("parse email url fragment %q: %v", line, err)
+				}
+				tok = fragmentParams.Get("token")
+			}
+			if tok == "" {
+				t.Fatal("token param not found in email url")
 			}
 			return tok
 		}
 	}
-	t.Fatal("verification url not found in email text body")
+	t.Fatal("url with token not found in email text body")
 	return ""
 }

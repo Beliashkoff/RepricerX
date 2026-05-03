@@ -14,11 +14,23 @@ MVP для сдачи должен быть готов до 10.05.2026. Подр
 docker compose up --build
 ```
 
-После старта API должен отвечать:
+После старта доступны:
+- фронтенд: `http://localhost:5173`
+- API: `http://localhost:8080`
 - `GET http://localhost:8080/healthz`
 - `GET http://localhost:8080/ready`
 
-Для локальной разработки `docker-compose.yaml` содержит dev-значения по умолчанию.
+Для локальной разработки `docker-compose.yaml` поднимает Postgres, Redis, API, worker и Vite-фронтенд.
+Фронтенд монтируется из `./web`, поэтому изменения в React-коде применяются через Vite HMR без пересборки контейнера.
+Внутри Docker Vite проксирует `/api` и `/healthz` в `http://api:8080`; при запуске фронтенда напрямую на хосте используется `http://localhost:8080`.
+
+Полезные команды:
+```bash
+make up      # docker compose up -d --build
+make logs    # логи всех dev-сервисов
+make ps      # статус контейнеров
+make down    # остановить dev-сервисы
+```
 
 # REST API
 
@@ -43,9 +55,13 @@ docker compose up --build
 | PATCH | `/api/auth/me`                | cookie      | да   | Обновление `displayName`                         |
 | GET   | `/api/auth/verify?token=...`  | —           | —    | Подтверждение email; редирект на фронтенд        |
 | POST  | `/api/auth/verification/resend` | —         | —    | Повторная отправка письма верификации            |
+| POST  | `/api/auth/password/forgot`  | —           | —    | Запрос ссылки сброса пароля; всегда возвращает общий ответ |
+| POST  | `/api/auth/password/reset`   | —           | —    | Установка нового пароля по одноразовому токену   |
 
 > Все ошибки возвращаются в формате `{"error":{"code":"...","message":"..."}}`.  
 > Мутирующие защищённые эндпоинты проверяют заголовок `Origin` (same-origin CSRF).
+
+Для писем подтверждения и сброса пароля используется `MAILER_MODE=log` в dev или `MAILER_MODE=smtp` в prod. Для SMTP нужны `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Ссылка сброса пароля настраивается через `PASSWORD_RESET_URL_BASE`, например `https://example.com/reset-password`; токен добавляется в fragment (`#token=...`) и не должен попадать в серверные логи.
 
 ## Магазины `/api/shops`
 

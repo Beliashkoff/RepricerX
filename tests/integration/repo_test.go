@@ -403,3 +403,146 @@ func TestEmailVerificationsRepo_InvalidatePending(t *testing.T) {
 		t.Fatalf("want ErrNotFound after InvalidatePending, got %v", err)
 	}
 }
+
+// --- PasswordResetTokensRepository ---
+
+func TestPasswordResetTokensRepo_ConsumeSingleUseAndRevokesSessions(t *testing.T) {
+	truncate(t)
+	usersRepo := repository.NewUsersRepository(testPool)
+	sessRepo := repository.NewSessionsRepository(testPool)
+	resetRepo := repository.NewPasswordResetTokensRepository(testPool)
+	ctx := context.Background()
+
+	user := &domain.User{
+		ID: uuid.New(), Email: "resetrepo@example.com",
+		PasswordHash: "old-hash", DisplayName: "R", Status: domain.UserStatusActive,
+	}
+	if err := usersRepo.Create(ctx, user); err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	lockout := time.Now().UTC().Add(time.Hour)
+	if err := usersRepo.RegisterFailedLogin(ctx, user.ID, 5, &lockout); err != nil {
+		t.Fatalf("RegisterFailedLogin: %v", err)
+	}
+
+	_, sessionHash, _ := token.Generate()
+	now := time.Now().UTC()
+	if err := sessRepo.Create(ctx, &domain.Session{
+		ID:                uuid.New(),
+		UserID:            user.ID,
+		TokenHash:         sessionHash,
+		CreatedAt:         now,
+		LastSeenAt:        now,
+		IdleExpiresAt:     now.Add(time.Hour),
+		AbsoluteExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+
+	plaintext, resetHash, _ := token.Generate()
+	if err := resetRepo.Issue(ctx, user.ID, resetHash, now.Add(time.Hour)); err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	userID, revoked, err := resetRepo.Consume(ctx, token.Hash(plaintext), "new-hash")
+	if err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if userID != user.ID {
+		t.Fatalf("want userID %v, got %v", user.ID, userID)
+	}
+	if revoked != 1 {
+		t.Fatalf("want 1 revoked session, got %d", revoked)
+	}
+
+	got, err := usersRepo.GetByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.PasswordHash != "new-hash" {
+		t.Fatalf("want new password hash, got %q", got.PasswordHash)
+	}
+	if got.FailedLoginCount != 0 || got.LockoutUntil != nil {
+		t.Fatalf("failed login state was not reset: count=%d lockout=%v", got.FailedLoginCount, got.LockoutUntil)
+	}
+	if _, err = sessRepo.GetByTokenHash(ctx, sessionHash); err != repository.ErrNotFound {
+		t.Fatalf("want session revoked, got %v", err)
+	}
+
+	_, _, err = resetRepo.Consume(ctx, token.Hash(plaintext), "another-hash")
+	if err != repository.ErrNotFound {
+		t.Fatalf("want ErrNotFound on token reuse, got %v", err)
+	}
+}
+
+func TestPasswordResetTokensRepo_IssueInvalidatesOlderPending(t *testing.T) {
+	truncate(t)
+	usersRepo := repository.NewUsersRepository(testPool)
+	resetRepo := repository.NewPasswordResetTokensRepository(testPool)
+	ctx := context.Background()
+
+	user := &domain.User{
+		ID: uuid.New(), Email: "resetissue@example.com",
+		PasswordHash: "h", DisplayName: "R", Status: domain.UserStatusActive,
+	}
+	if err := usersRepo.Create(ctx, user); err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+
+	oldPlain, oldHash, _ := token.Generate()
+	newPlain, newHash, _ := token.Generate()
+	if err := resetRepo.Issue(ctx, user.ID, oldHash, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Issue old: %v", err)
+	}
+	if err := resetRepo.Issue(ctx, user.ID, newHash, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Issue new: %v", err)
+	}
+
+	_, _, err := resetRepo.Consume(ctx, token.Hash(oldPlain), "old-consume")
+	if err != repository.ErrNotFound {
+		t.Fatalf("want old token invalidated, got %v", err)
+	}
+	if _, _, err = resetRepo.Consume(ctx, token.Hash(newPlain), "new-consume"); err != nil {
+		t.Fatalf("new token should remain valid: %v", err)
+	}
+}
+
+func TestPasswordResetTokensRepo_RejectsExpiredAndBlockedUser(t *testing.T) {
+	truncate(t)
+	usersRepo := repository.NewUsersRepository(testPool)
+	resetRepo := repository.NewPasswordResetTokensRepository(testPool)
+	ctx := context.Background()
+
+	expiredUser := &domain.User{
+		ID: uuid.New(), Email: "expired-reset@example.com",
+		PasswordHash: "h", DisplayName: "R", Status: domain.UserStatusActive,
+	}
+	if err := usersRepo.Create(ctx, expiredUser); err != nil {
+		t.Fatalf("Create expired user: %v", err)
+	}
+	expiredPlain, expiredHash, _ := token.Generate()
+	if err := resetRepo.Issue(ctx, expiredUser.ID, expiredHash, time.Now().UTC().Add(-time.Minute)); err != nil {
+		t.Fatalf("Issue expired: %v", err)
+	}
+	if _, _, err := resetRepo.Consume(ctx, token.Hash(expiredPlain), "new-hash"); err != repository.ErrNotFound {
+		t.Fatalf("want ErrNotFound for expired token, got %v", err)
+	}
+
+	blockedUser := &domain.User{
+		ID: uuid.New(), Email: "blocked-reset@example.com",
+		PasswordHash: "h", DisplayName: "R", Status: domain.UserStatusActive,
+	}
+	if err := usersRepo.Create(ctx, blockedUser); err != nil {
+		t.Fatalf("Create blocked user: %v", err)
+	}
+	blockedPlain, blockedHash, _ := token.Generate()
+	if err := resetRepo.Issue(ctx, blockedUser.ID, blockedHash, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Issue blocked: %v", err)
+	}
+	if err := usersRepo.UpdateStatus(ctx, blockedUser.ID, domain.UserStatusBlocked); err != nil {
+		t.Fatalf("UpdateStatus blocked: %v", err)
+	}
+	if _, _, err := resetRepo.Consume(ctx, token.Hash(blockedPlain), "new-hash"); err != repository.ErrNotFound {
+		t.Fatalf("want ErrNotFound for blocked user, got %v", err)
+	}
+}

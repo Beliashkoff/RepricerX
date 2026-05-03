@@ -9,8 +9,8 @@
 //	@description	Браузер отправляет его автоматически; при работе через curl/Postman передавайте `-b "rx_session=<token>"`.
 //	@description
 //	@description	## CSRF-защита
-//	@description	Все мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`
-//	@description	и `/api/auth/verification/resend`, проверяют заголовок `Origin`.
+//	@description	Все мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`,
+//	@description	`/api/auth/verification/resend`, `/api/auth/password/forgot` и `/api/auth/password/reset`, проверяют заголовок `Origin`.
 //	@description	Он должен совпадать с одним из разрешённых источников (настраивается через `ALLOWED_ORIGINS`).
 //	@description	Swagger UI выставляет `Origin` автоматически.
 //
@@ -94,6 +94,7 @@ func main() {
 	usersRepo := repository.NewUsersRepository(pool)
 	sessionsRepo := repository.NewSessionsRepository(pool)
 	verRepo := repository.NewEmailVerificationsRepository(pool)
+	resetRepo := repository.NewPasswordResetTokensRepository(pool)
 	shopsRepo := repository.NewShopsRepository(pool)
 	intLogRepo := repository.NewIntegrationLogRepository(pool)
 
@@ -115,11 +116,12 @@ func main() {
 		},
 	})
 
-	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, m, audit, authsvc.Config{
-		IdleTTL:         24 * time.Hour,
-		AbsoluteTTL:     cfg.SessionAbsoluteTTL,
-		TrustProxy:      cfg.TrustProxyHeaders,
-		VerificationURL: cfg.VerificationURLBase,
+	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, resetRepo, m, audit, authsvc.Config{
+		IdleTTL:          24 * time.Hour,
+		AbsoluteTTL:      cfg.SessionAbsoluteTTL,
+		TrustProxy:       cfg.TrustProxyHeaders,
+		VerificationURL:  cfg.VerificationURLBase,
+		PasswordResetURL: cfg.PasswordResetURLBase,
 	})
 
 	if cfg.IsProd() {
@@ -144,7 +146,7 @@ func main() {
 		FrontendURL:    cfg.VerificationURLBase,
 	})
 
-	// Cleanup горутина: каждый час удаляем протухшие сессии и токены верификации.
+	// Cleanup горутина: каждый час удаляем протухшие сессии и одноразовые токены.
 	// Этап 7: переедет в robfig/cron v3.
 	go func() {
 		ticker := time.NewTicker(time.Hour)
@@ -161,6 +163,12 @@ func main() {
 				log.Error("cleanup: expired verifications", "error", err)
 			} else if n > 0 {
 				log.Info("cleanup: удалены токены верификации", "count", n)
+			}
+			n, err = resetRepo.DeleteExpired(context.Background())
+			if err != nil {
+				log.Error("cleanup: expired password resets", "error", err)
+			} else if n > 0 {
+				log.Info("cleanup: удалены токены сброса пароля", "count", n)
 			}
 			n, err = intLogRepo.DeleteOlderThan(context.Background(), time.Now().UTC().Add(-30*24*time.Hour))
 			if err != nil {

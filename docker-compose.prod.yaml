@@ -57,6 +57,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       VERIFICATION_URL_BASE: https://${DOMAIN}/verify
+      PASSWORD_RESET_URL_BASE: https://${DOMAIN}/reset-password
     depends_on:
       db:
         condition: service_healthy

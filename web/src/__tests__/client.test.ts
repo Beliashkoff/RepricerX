@@ -43,10 +43,16 @@ describe('CSRF Origin interceptor', () => {
 // --- Response error interceptor: логика формирования сообщения об ошибке ---
 describe('response error interceptor', () => {
   function applyErrorInterceptor(err: unknown): never {
-    const e = err as { response?: { data?: { message?: string } }; message?: string }
-    const msg = e.response?.data?.message || e.message || 'Ошибка запроса'
+    const e = err as { response?: { data?: { error?: { message?: string }; message?: string } }; message?: string }
+    const msg = e.response?.data?.error?.message || e.response?.data?.message || e.message || 'Ошибка запроса'
     throw new Error(msg)
   }
+
+  it('берёт message из response.data.error.message', () => {
+    expect(() =>
+      applyErrorInterceptor({ response: { data: { error: { message: 'Недействительный токен' } } } })
+    ).toThrow('Недействительный токен')
+  })
 
   it('берёт message из response.data.message', () => {
     expect(() =>
@@ -77,6 +83,15 @@ describe('response error interceptor', () => {
         message: 'Общая ошибка',
       })
     ).toThrow('Конкретная ошибка')
+  })
+
+  it('response.data.error.message приоритетнее response.data.message', () => {
+    expect(() =>
+      applyErrorInterceptor({
+        response: { data: { error: { message: 'Ошибка envelope' }, message: 'Старый формат' } },
+        message: 'Общая ошибка',
+      })
+    ).toThrow('Ошибка envelope')
   })
 })
 

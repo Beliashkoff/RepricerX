@@ -1,0 +1,10 @@
+.git
+.gitignore
+
+**/node_modules
+web/dist
+dist
+
+.env
+.env.*
+docker/certs

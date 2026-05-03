@@ -55,6 +55,16 @@ type EmailVerificationsRepository interface {
 	DeleteExpired(ctx context.Context) (int64, error)
 }
 
+// PasswordResetTokensRepository — операции с одноразовыми токенами сброса пароля.
+type PasswordResetTokensRepository interface {
+	// Issue инвалидирует старые ожидающие токены пользователя и создаёт новый.
+	Issue(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error
+	// Consume атомарно помечает валидный токен использованным, меняет пароль,
+	// сбрасывает lockout/fail-счётчик и отзывает все сессии пользователя.
+	Consume(ctx context.Context, tokenHash string, newPasswordHash string) (userID uuid.UUID, revokedSessions int64, err error)
+	DeleteExpired(ctx context.Context) (int64, error)
+}
+
 // ShopsRepository — операции с таблицей shops.
 type ShopsRepository interface {
 	Create(ctx context.Context, shop *domain.Shop) error

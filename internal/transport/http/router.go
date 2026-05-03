@@ -21,8 +21,8 @@ type RouterConfig struct {
 	Audit          *auditlog.Logger
 	AllowedOrigins []string
 	TrustProxy     bool
-	SecureCookie bool   // true в prod
-	FrontendURL  string // куда редиректить после email-verify
+	SecureCookie   bool   // true в prod
+	FrontendURL    string // куда редиректить после email-verify
 }
 
 // RegisterRoutes регистрирует все HTTP-маршруты приложения на переданном engine.
@@ -49,6 +49,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		public.POST("/login", authH.Login)
 		public.GET("/verify", authH.VerifyEmail)
 		public.POST("/verification/resend", authH.ResendVerification)
+		public.POST("/password/forgot", authH.ForgotPassword)
+		public.POST("/password/reset", authH.ResetPassword)
 	}
 
 	requireAuth := RequireAuth(cfg.AuthSvc, cfg.Audit, cfg.TrustProxy, cfg.SecureCookie)

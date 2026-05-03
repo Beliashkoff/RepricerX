@@ -28,6 +28,8 @@ func handleAuthErr(c *gin.Context, err error) {
 	case auth.ErrInvalidCredentials:
 		// Единственный ответ на все ошибки логина — не раскрываем причину.
 		errResp(c, http.StatusUnauthorized, "invalid_credentials", "Неверный email или пароль")
+	case auth.ErrInvalidResetToken:
+		errResp(c, http.StatusBadRequest, "invalid_reset_token", "Ссылка сброса пароля недействительна или истекла")
 	case auth.ErrSessionNotFound:
 		errResp(c, http.StatusUnauthorized, "unauthorized", "Сессия не найдена или истекла")
 	case auth.ErrUserBlocked:

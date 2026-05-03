@@ -25,6 +25,12 @@ type VerificationData struct {
 	URL         string
 }
 
+// PasswordResetData — данные для шаблона письма сброса пароля.
+type PasswordResetData struct {
+	DisplayName string
+	URL         string
+}
+
 // RenderVerification рендерит HTML и текстовое тела письма верификации.
 func RenderVerification(data VerificationData) (htmlBody, textBody string, err error) {
 	htmlBody, err = renderHTML("templates/verification.html.tmpl", data)
@@ -32,6 +38,19 @@ func RenderVerification(data VerificationData) (htmlBody, textBody string, err e
 		return "", "", fmt.Errorf("mailer: html template: %w", err)
 	}
 	textBody, err = renderText("templates/verification.txt.tmpl", data)
+	if err != nil {
+		return "", "", fmt.Errorf("mailer: text template: %w", err)
+	}
+	return htmlBody, textBody, nil
+}
+
+// RenderPasswordReset рендерит HTML и текстовое тела письма сброса пароля.
+func RenderPasswordReset(data PasswordResetData) (htmlBody, textBody string, err error) {
+	htmlBody, err = renderHTML("templates/password_reset.html.tmpl", data)
+	if err != nil {
+		return "", "", fmt.Errorf("mailer: html template: %w", err)
+	}
+	textBody, err = renderText("templates/password_reset.txt.tmpl", data)
 	if err != nil {
 		return "", "", fmt.Errorf("mailer: text template: %w", err)
 	}

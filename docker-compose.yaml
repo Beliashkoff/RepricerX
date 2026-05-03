@@ -53,6 +53,7 @@ services:
       CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       MAILER_MODE: ${MAILER_MODE:-log}
       VERIFICATION_URL_BASE: ${VERIFICATION_URL_BASE:-http://localhost:5173/verify}
+      PASSWORD_RESET_URL_BASE: ${PASSWORD_RESET_URL_BASE:-http://localhost:5173/reset-password}
     depends_on:
       db:
         condition: service_healthy
@@ -67,9 +68,48 @@ services:
       timeout: 5s
       retries: 5
 
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    container_name: repricer_worker
+    environment:
+      DATABASE_URL: postgres://admin:secret@db:5432/repricer_db?sslmode=disable
+      REDIS_ADDR: redis:6379
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-only-change-me-32-bytes-minimum}
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - repricer-net
+
+  web:
+    image: node:22-alpine
+    container_name: repricer_web
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_DEV_PROXY_TARGET: http://api:8080
+    volumes:
+      - ./web:/app
+      - web_node_modules:/app/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - repricer-net
+
 volumes:
   pg_data:
   redis_data:
+  web_node_modules:
 
 networks:
   repricer-net:

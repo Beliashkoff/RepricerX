@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
@@ -199,4 +200,70 @@ func (h *AuthHandler) ResendVerification(c *gin.Context) {
 	}
 	// Всегда 202 — не раскрываем существование email.
 	c.Status(http.StatusAccepted)
+}
+
+// ForgotPassword godoc
+//
+//	@Summary		Запрос сброса пароля
+//	@Description	Выдаёт одноразовый токен сброса пароля и отправляет письмо, если email принадлежит активному аккаунту.
+//	@Description	Всегда возвращает 202 — сервер не раскрывает, существует ли аккаунт с таким email.
+//	@Tags			auth
+//	@Accept			json
+//	@Param			body	body	forgotPasswordRequest	true	"Email пользователя"
+//	@Success		202	"Письмо отправлено или запрос принят"
+//	@Router			/api/auth/password/forgot [post]
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req forgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err == nil {
+		go func(email string) {
+			_ = h.svc.ForgotPassword(context.Background(), email)
+		}(req.Email)
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Если аккаунт существует, письмо для сброса пароля отправлено",
+	})
+}
+
+// ResetPassword godoc
+//
+//	@Summary		Сброс пароля
+//	@Description	Принимает одноразовый токен и новый пароль. При успехе отзывает все сессии пользователя.
+//	@Tags			auth
+//	@Accept			json
+//	@Param			body	body	resetPasswordRequest	true	"Токен и новый пароль"
+//	@Success		204	"Пароль изменён, сессии отозваны"
+//	@Failure		400	{object}	errorResponse	"Неверный запрос, слабый пароль или недействительный токен"
+//	@Failure		500	{object}	errorResponse
+//	@Router			/api/auth/password/reset [post]
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req resetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		errResp(c, http.StatusBadRequest, "bad_request", "Неверный формат запроса")
+		return
+	}
+
+	newPassword := req.Password
+	if newPassword == "" {
+		newPassword = req.NewPassword
+	}
+	if newPassword == "" {
+		errResp(c, http.StatusBadRequest, "bad_request", "Неверный формат запроса")
+		return
+	}
+	if req.PasswordConfirmation == "" {
+		errResp(c, http.StatusBadRequest, "bad_request", "Неверный формат запроса")
+		return
+	}
+	if newPassword != req.PasswordConfirmation {
+		errResp(c, http.StatusBadRequest, "password_mismatch", "Пароли не совпадают")
+		return
+	}
+
+	if err := h.svc.ResetPassword(c.Request.Context(), c.Request, req.Token, newPassword); err != nil {
+		handleAuthErr(c, err)
+		return
+	}
+
+	ClearSessionCookie(c, h.secure)
+	c.Status(http.StatusNoContent)
 }

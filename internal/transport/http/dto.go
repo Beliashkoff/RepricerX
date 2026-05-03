@@ -53,3 +53,16 @@ type updateMeRequest struct {
 type resendRequest struct {
 	Email string `json:"email" binding:"required" example:"user@example.com"`
 }
+
+// POST /api/auth/password/forgot
+type forgotPasswordRequest struct {
+	Email string `json:"email" binding:"required" example:"user@example.com"`
+}
+
+// POST /api/auth/password/reset
+type resetPasswordRequest struct {
+	Token                string `json:"token" binding:"required" example:"q83s..."`
+	Password             string `json:"password,omitempty" example:"NewValidPass123!"`
+	NewPassword          string `json:"newPassword,omitempty" example:"NewValidPass123!"`
+	PasswordConfirmation string `json:"passwordConfirmation,omitempty" example:"NewValidPass123!"`
+}

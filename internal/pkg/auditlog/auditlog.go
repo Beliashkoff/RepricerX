@@ -103,6 +103,14 @@ func (l *Logger) EmailVerificationSent(userID uuid.UUID) {
 	)
 }
 
+// PasswordResetSent — письмо сброса пароля отправлено.
+// INFO: нормальный поток, токен и ссылка не логируются.
+func (l *Logger) PasswordResetSent(userID uuid.UUID) {
+	l.log.Info("password_reset_sent",
+		slog.String("user_id", userID.String()),
+	)
+}
+
 // EmailSendFailed — SMTP-ошибка при отправке; пользователь уже создан.
 // ERROR: требует внимания, видно в prod.
 func (l *Logger) EmailSendFailed(userID uuid.UUID, err error) {
@@ -117,6 +125,15 @@ func (l *Logger) EmailSendFailed(userID uuid.UUID, err error) {
 func (l *Logger) EmailVerificationUsed(userID uuid.UUID) {
 	l.log.Info("email_verification_used",
 		slog.String("user_id", userID.String()),
+	)
+}
+
+// PasswordResetUsed — reset-токен успешно использован.
+// INFO: нормальный поток, токен не логируется.
+func (l *Logger) PasswordResetUsed(userID uuid.UUID, revokedSessions int64) {
+	l.log.Info("password_reset_used",
+		slog.String("user_id", userID.String()),
+		slog.Int64("revoked_sessions", revokedSessions),
 	)
 }
 

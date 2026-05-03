@@ -67,6 +67,11 @@ describe('Login — отрисовка', () => {
     renderLogin()
     expect(screen.getByRole('link', { name: /Зарегистрироваться/i })).toBeInTheDocument()
   })
+
+  it('содержит ссылку восстановления пароля', () => {
+    renderLogin()
+    expect(screen.getByRole('link', { name: /Забыли пароль/i })).toHaveAttribute('href', '/forgot-password')
+  })
 })
 
 describe('Login — валидация', () => {

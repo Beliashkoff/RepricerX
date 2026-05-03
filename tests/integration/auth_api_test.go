@@ -236,7 +236,9 @@ func TestUpdateMe_Success(t *testing.T) {
 	)
 	mustStatus(t, resp, http.StatusOK)
 
-	var body struct{ DisplayName string `json:"displayName"` }
+	var body struct {
+		DisplayName string `json:"displayName"`
+	}
 	mustDecode(t, resp, &body)
 	if body.DisplayName != newName {
 		t.Fatalf("want displayName %q, got %q", newName, body.DisplayName)
@@ -314,6 +316,77 @@ func TestVerifyEmail_FullFlow(t *testing.T) {
 	}), http.StatusOK)
 }
 
+// --- Password reset full flow ---
+
+func TestPasswordReset_FullFlow(t *testing.T) {
+	truncate(t)
+	client := newClient()
+
+	mustStatus(t, doJSON(t, client, http.MethodPost, "/api/auth/register", map[string]any{
+		"email": testEmail, "password": testPassword, "displayName": testName,
+	}), http.StatusCreated)
+	activateUser(t, testEmail)
+
+	mustStatus(t, doJSON(t, client, http.MethodPost, "/api/auth/login", map[string]any{
+		"email": testEmail, "password": testPassword,
+	}), http.StatusOK)
+	mustStatus(t, doJSON(t, client, http.MethodGet, "/api/auth/me", nil), http.StatusOK)
+
+	for i := 0; i < 5; i++ {
+		mustStatus(t, doJSON(t, newClient(), http.MethodPost, "/api/auth/login", map[string]any{
+			"email": testEmail, "password": "WrongPass456!",
+		}), http.StatusUnauthorized)
+	}
+
+	mustStatus(t, doJSON(t, newClient(), http.MethodPost, "/api/auth/password/forgot", map[string]any{
+		"email": testEmail,
+	}), http.StatusAccepted)
+
+	email := testMailer.waitForSubject(t, "Сброс пароля")
+	tok := extractResetToken(t, email)
+	newPassword := "NewValidPass123!"
+
+	resp := doJSON(t, newClient(), http.MethodPost, "/api/auth/password/reset", map[string]any{
+		"token": tok, "password": "weak", "passwordConfirmation": "weak",
+	})
+	mustStatus(t, resp, http.StatusBadRequest)
+	mustErrorCode(t, resp, "weak_password")
+
+	mustStatus(t, doJSON(t, newClient(), http.MethodPost, "/api/auth/password/reset", map[string]any{
+		"token": tok, "password": newPassword, "passwordConfirmation": newPassword,
+	}), http.StatusNoContent)
+
+	mustStatus(t, doJSON(t, client, http.MethodGet, "/api/auth/me", nil), http.StatusUnauthorized)
+	mustStatus(t, doJSON(t, newClient(), http.MethodPost, "/api/auth/login", map[string]any{
+		"email": testEmail, "password": testPassword,
+	}), http.StatusUnauthorized)
+	mustStatus(t, doJSON(t, newClient(), http.MethodPost, "/api/auth/login", map[string]any{
+		"email": testEmail, "password": newPassword,
+	}), http.StatusOK)
+
+	resp = doJSON(t, newClient(), http.MethodPost, "/api/auth/password/reset", map[string]any{
+		"token": tok, "password": "AnotherValidPass123!", "passwordConfirmation": "AnotherValidPass123!",
+	})
+	mustStatus(t, resp, http.StatusBadRequest)
+	mustErrorCode(t, resp, "invalid_reset_token")
+}
+
+func TestForgotPassword_GenericAccepted(t *testing.T) {
+	truncate(t)
+	client := newClient()
+
+	mustStatus(t, doJSON(t, client, http.MethodPost, "/api/auth/password/forgot", map[string]any{
+		"email": "nobody@example.com",
+	}), http.StatusAccepted)
+	if email := testMailer.last(); email != nil {
+		t.Fatalf("unexpected email for unknown account: %#v", email)
+	}
+
+	mustStatus(t, doJSON(t, client, http.MethodPost, "/api/auth/password/forgot", map[string]any{
+		"email": "not-an-email",
+	}), http.StatusAccepted)
+}
+
 // --- Multiple sessions / isolation ---
 
 func TestMultipleSessions_Independent(t *testing.T) {
@@ -346,4 +419,3 @@ func TestMultipleSessions_Independent(t *testing.T) {
 	mustStatus(t, doJSON(t, c1, http.MethodGet, "/api/auth/me", nil), http.StatusUnauthorized)
 	mustStatus(t, doJSON(t, c2, http.MethodGet, "/api/auth/me", nil), http.StatusOK)
 }
-

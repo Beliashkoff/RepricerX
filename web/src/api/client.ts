@@ -17,7 +17,7 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (r) => r,
   (err) => {
-    const msg = err.response?.data?.message || err.message || 'Ошибка запроса'
+    const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message || 'Ошибка запроса'
     return Promise.reject(new Error(msg))
   }
 )

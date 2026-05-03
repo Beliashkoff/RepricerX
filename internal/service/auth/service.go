@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,7 +18,6 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/token"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/google/uuid"
-	"net/http"
 )
 
 // Публичные ошибки сервиса — хендлеры маппят их в HTTP-коды.
@@ -25,14 +26,16 @@ var (
 	ErrEmailTaken         = errors.New("email taken")
 	ErrSessionNotFound    = errors.New("session not found")
 	ErrUserBlocked        = errors.New("user blocked")
+	ErrInvalidResetToken  = errors.New("invalid reset token")
 )
 
 // Config — зависимости сервиса.
 type Config struct {
-	IdleTTL         time.Duration // 24 ч из конфига
-	AbsoluteTTL     time.Duration // 7 дней из конфига
-	TrustProxy      bool
-	VerificationURL string // базовый URL без query string
+	IdleTTL          time.Duration // 24 ч из конфига
+	AbsoluteTTL      time.Duration // 7 дней из конфига
+	TrustProxy       bool
+	VerificationURL  string // базовый URL без query string
+	PasswordResetURL string // базовый URL без query string
 }
 
 // Service — основной auth-сервис.
@@ -40,31 +43,39 @@ type Service struct {
 	users         repository.UsersRepository
 	sessions      repository.SessionsRepository
 	verifications repository.EmailVerificationsRepository
+	resetTokens   repository.PasswordResetTokensRepository
 	mailer        mailer.Mailer
 	audit         *auditlog.Logger
 	cfg           Config
 
 	// resendLimiter — rate-limit resend verification: 1 запрос в минуту на email.
-	resendMu      sync.Mutex
-	resendLastAt  map[string]time.Time
+	resendMu           sync.Mutex
+	resendLastAt       map[string]time.Time
+	resetMu            sync.Mutex
+	resetLastAt        map[string]time.Time
+	resetAttemptLastAt map[string]time.Time
 }
 
 func New(
 	users repository.UsersRepository,
 	sessions repository.SessionsRepository,
 	verifications repository.EmailVerificationsRepository,
+	resetTokens repository.PasswordResetTokensRepository,
 	m mailer.Mailer,
 	audit *auditlog.Logger,
 	cfg Config,
 ) *Service {
 	return &Service{
-		users:         users,
-		sessions:      sessions,
-		verifications: verifications,
-		mailer:        m,
-		audit:         audit,
-		cfg:           cfg,
-		resendLastAt:  make(map[string]time.Time),
+		users:              users,
+		sessions:           sessions,
+		verifications:      verifications,
+		resetTokens:        resetTokens,
+		mailer:             m,
+		audit:              audit,
+		cfg:                cfg,
+		resendLastAt:       make(map[string]time.Time),
+		resetLastAt:        make(map[string]time.Time),
+		resetAttemptLastAt: make(map[string]time.Time),
 	}
 }
 
@@ -189,6 +200,84 @@ func (s *Service) ResendVerification(ctx context.Context, email string) error {
 	} else {
 		s.audit.EmailVerificationSent(user.ID)
 	}
+	return nil
+}
+
+// ForgotPassword выдаёт одноразовый токен сброса пароля и отправляет письмо.
+// Всегда возвращает nil — не раскрывает существование email.
+func (s *Service) ForgotPassword(ctx context.Context, email string) error {
+	email = strings.TrimSpace(email)
+	if email == "" || validateEmail(email) != nil {
+		return nil
+	}
+
+	if s.resetRateLimited(email) {
+		return nil
+	}
+
+	user, err := s.users.GetByEmail(ctx, email)
+	if err != nil || user.Status != domain.UserStatusActive {
+		return nil
+	}
+
+	plaintext, hashHex, err := token.Generate()
+	if err != nil {
+		return fmt.Errorf("forgot password: generate token: %w", err)
+	}
+
+	expiresAt := time.Now().Add(time.Hour)
+	if err = s.resetTokens.Issue(ctx, user.ID, hashHex, expiresAt); err != nil {
+		return fmt.Errorf("forgot password: issue token: %w", err)
+	}
+
+	resetURL := s.cfg.PasswordResetURL + "#token=" + plaintext
+	htmlBody, textBody, err := mailer.RenderPasswordReset(mailer.PasswordResetData{
+		DisplayName: user.DisplayName,
+		URL:         resetURL,
+	})
+	if err != nil {
+		return fmt.Errorf("forgot password: render email template: %w", err)
+	}
+	if err = s.mailer.Send(ctx, user.Email, "Сброс пароля — RepricerX", htmlBody, textBody); err != nil {
+		s.audit.EmailSendFailed(user.ID, err)
+		return nil
+	}
+	s.audit.PasswordResetSent(user.ID)
+	return nil
+}
+
+// ResetPassword атомарно использует reset-токен, меняет пароль и отзывает сессии.
+func (s *Service) ResetPassword(ctx context.Context, r *http.Request, plaintextToken, newPassword string) error {
+	plaintextToken = strings.TrimSpace(plaintextToken)
+	if plaintextToken == "" {
+		return ErrInvalidResetToken
+	}
+	tokenHash := token.Hash(plaintextToken)
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+	ipPrefix := ""
+	if r != nil {
+		ipPrefix = netutil.IPPrefix(r, s.cfg.TrustProxy)
+	}
+	if s.resetAttemptRateLimited(ipPrefix, tokenHash) {
+		return ErrInvalidResetToken
+	}
+
+	hash, err := password.Hash(newPassword)
+	if err != nil {
+		return fmt.Errorf("reset password: hash password: %w", err)
+	}
+
+	userID, revokedSessions, err := s.resetTokens.Consume(ctx, tokenHash, hash)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrInvalidResetToken
+	}
+	if err != nil {
+		return fmt.Errorf("reset password: consume token: %w", err)
+	}
+
+	s.audit.PasswordResetUsed(userID, revokedSessions)
 	return nil
 }
 
@@ -323,6 +412,57 @@ func (s *Service) UpdateDisplayName(ctx context.Context, id uuid.UUID, name stri
 // RevokeAllSessions удаляет все сессии пользователя (при блокировке).
 func (s *Service) RevokeAllSessions(ctx context.Context, userID uuid.UUID) {
 	_, _ = s.sessions.DeleteByUserID(ctx, userID)
+}
+
+func (s *Service) resetRateLimited(email string) bool {
+	key := strings.ToLower(email)
+	now := time.Now()
+
+	s.resetMu.Lock()
+	defer s.resetMu.Unlock()
+
+	for k, at := range s.resetLastAt {
+		if now.Sub(at) > time.Hour {
+			delete(s.resetLastAt, k)
+		}
+	}
+
+	lastAt, ok := s.resetLastAt[key]
+	if ok && now.Sub(lastAt) < time.Minute {
+		return true
+	}
+	s.resetLastAt[key] = now
+	return false
+}
+
+func (s *Service) resetAttemptRateLimited(ipPrefix, tokenHash string) bool {
+	now := time.Now()
+
+	s.resetMu.Lock()
+	defer s.resetMu.Unlock()
+
+	for k, at := range s.resetAttemptLastAt {
+		if now.Sub(at) > time.Minute {
+			delete(s.resetAttemptLastAt, k)
+		}
+	}
+
+	for _, key := range []string{"ip:" + ipPrefix, "token:" + tokenHash} {
+		if key == "ip:" {
+			continue
+		}
+		lastAt, ok := s.resetAttemptLastAt[key]
+		if ok && now.Sub(lastAt) < 2*time.Second {
+			return true
+		}
+	}
+	for _, key := range []string{"ip:" + ipPrefix, "token:" + tokenHash} {
+		if key == "ip:" {
+			continue
+		}
+		s.resetAttemptLastAt[key] = now
+	}
+	return false
 }
 
 func truncateUA(ua string) string {

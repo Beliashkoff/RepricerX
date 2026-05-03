@@ -1,4 +1,4 @@
-.PHONY: up down build build-worker migrate test test-integration lint swag \
+.PHONY: up down logs ps build build-worker migrate test test-integration lint swag \
         prod-up prod-down prod-logs prod-ps
 
 # Подтягиваем переменные из .env если файл существует
@@ -12,6 +12,12 @@ up:
 
 down:
 	docker compose down
+
+logs:
+	docker compose logs -f
+
+ps:
+	docker compose ps
 
 build:
 	go build -o api ./cmd/api
