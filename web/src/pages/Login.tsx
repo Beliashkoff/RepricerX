@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -39,11 +39,18 @@ function SocialButton({ icon, label, onClick }: { icon: React.ReactNode; label: 
 export default function Login() {
   const { user, isLoading, login } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
+
+  useEffect(() => {
+    const v = searchParams.get('verified')
+    if (v === '1') toast.success('Email подтверждён — можно войти')
+    else if (v === '0') toast.error('Ссылка недействительна или уже использована')
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isLoading && user) return <Navigate to="/dashboard" replace />
 

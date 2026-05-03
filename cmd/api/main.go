@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -135,6 +136,12 @@ func main() {
 	r.GET("/healthz", health.healthz)
 	r.GET("/ready", health.ready)
 
+	// FrontendURL — только origin (scheme + host), без пути.
+	frontendURL := cfg.VerificationURLBase
+	if u, err := url.Parse(cfg.VerificationURLBase); err == nil {
+		frontendURL = u.Scheme + "://" + u.Host
+	}
+
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        shopService,
@@ -143,7 +150,7 @@ func main() {
 		AllowedOrigins: cfg.AllowedOrigins,
 		TrustProxy:     cfg.TrustProxyHeaders,
 		SecureCookie:   cfg.IsProd(),
-		FrontendURL:    cfg.VerificationURLBase,
+		FrontendURL:    frontendURL,
 	})
 
 	// Cleanup горутина: каждый час удаляем протухшие сессии и одноразовые токены.
