@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/smtp"
 	"strings"
+	"time"
 )
 
 // SmtpMailer отправляет письма через Яндекс.Почту (smtp.yandex.ru:465, TLS).
@@ -29,13 +30,16 @@ func NewSmtpMailer(host, port, username, password, from string) *SmtpMailer {
 	}
 }
 
-func (m *SmtpMailer) Send(_ context.Context, to, subject, htmlBody, textBody string) error {
+func (m *SmtpMailer) Send(ctx context.Context, to, subject, htmlBody, textBody string) error {
 	// Яндекс.Почта на порту 465 требует TLS с первого байта (SSL), не STARTTLS.
-	tlsCfg := &tls.Config{
-		ServerName: m.host,
-		MinVersion: tls.VersionTLS12,
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: 10 * time.Second},
+		Config: &tls.Config{
+			ServerName: m.host,
+			MinVersion: tls.VersionTLS12,
+		},
 	}
-	conn, err := tls.Dial("tcp", net.JoinHostPort(m.host, m.port), tlsCfg)
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(m.host, m.port))
 	if err != nil {
 		return fmt.Errorf("smtp: tls dial: %w", err)
 	}

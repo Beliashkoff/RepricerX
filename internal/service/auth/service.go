@@ -113,13 +113,14 @@ func (s *Service) Register(ctx context.Context, email, pwd, displayName string) 
 		return nil, fmt.Errorf("register: create user: %w", err)
 	}
 
-	if err = s.sendVerification(ctx, user); err != nil {
-		// SMTP-ошибка не откатывает регистрацию — пользователь уже создан.
-		// Юзер может запросить resend позднее.
-		s.audit.EmailSendFailed(user.ID, err)
-	} else {
-		s.audit.EmailVerificationSent(user.ID)
-	}
+	// Отправляем письмо асинхронно — не блокируем HTTP-ответ.
+	go func(u *domain.User) {
+		if err := s.sendVerification(context.Background(), u); err != nil {
+			s.audit.EmailSendFailed(u.ID, err)
+		} else {
+			s.audit.EmailVerificationSent(u.ID)
+		}
+	}(user)
 
 	return &RegisterResult{Email: email}, nil
 }
@@ -238,11 +239,14 @@ func (s *Service) ForgotPassword(ctx context.Context, email string) error {
 	if err != nil {
 		return fmt.Errorf("forgot password: render email template: %w", err)
 	}
-	if err = s.mailer.Send(ctx, user.Email, "Сброс пароля — RepricerX", htmlBody, textBody); err != nil {
-		s.audit.EmailSendFailed(user.ID, err)
-		return nil
-	}
-	s.audit.PasswordResetSent(user.ID)
+	// Отправляем письмо асинхронно — не блокируем HTTP-ответ.
+	go func(u *domain.User, html, text string) {
+		if err := s.mailer.Send(context.Background(), u.Email, "Сброс пароля — RepricerX", html, text); err != nil {
+			s.audit.EmailSendFailed(u.ID, err)
+		} else {
+			s.audit.PasswordResetSent(u.ID)
+		}
+	}(user, htmlBody, textBody)
 	return nil
 }
 
