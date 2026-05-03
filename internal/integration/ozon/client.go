@@ -55,8 +55,8 @@ func (c *Client) TestAuth(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ozon: request failed: %w", err)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close() //nolint:errcheck
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return integration.ErrUnauthorized
@@ -112,10 +112,10 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		}
 		var page listResponse
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("ozon: decode list: %w", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		allItems = append(allItems, page.Result.Items...)
 		if len(page.Result.Items) < 100 {
@@ -157,14 +157,14 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		}
 		var infoResp infoResponse
 		if err := json.NewDecoder(resp.Body).Decode(&infoResp); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("ozon: decode info: %w", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		for _, p := range infoResp.Result {
 			price := 0.0
-			fmt.Sscanf(p.Price, "%f", &price)
+			_, _ = fmt.Sscanf(p.Price, "%f", &price)
 			skus = append(skus, integration.SKU{
 				ExternalSKU:  p.OfferID,
 				Name:         p.Name,
@@ -213,8 +213,8 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 	if err != nil {
 		return fmt.Errorf("ozon: update request: %w", err)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close() //nolint:errcheck
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ozon: update status %d", resp.StatusCode)

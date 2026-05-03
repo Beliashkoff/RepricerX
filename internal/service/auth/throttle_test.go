@@ -46,10 +46,10 @@ func TestLockoutUntil(t *testing.T) {
 	}
 	// На пороге — moment + 5 мин
 	u := lockoutUntil(5, now)
-	if u == nil {
+	if u == nil { //nolint:staticcheck
 		t.Fatal("count=5 не должен возвращать nil")
 	}
-	diff := u.Sub(now)
+	diff := u.Sub(now) //nolint:staticcheck // t.Fatal выше гарантирует u != nil
 	if diff < 4*time.Minute || diff > 6*time.Minute {
 		t.Errorf("count=5: ожидали ~5 мин, получили %v", diff)
 	}

@@ -215,7 +215,7 @@ func runMigrations(databaseURL string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer m.Close()
+	defer m.Close() //nolint:errcheck
 
 	if err := m.Up(); err != nil {
 		if errors.Is(err, migrate.ErrNoChange) {

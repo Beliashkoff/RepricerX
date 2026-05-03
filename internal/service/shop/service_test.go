@@ -174,9 +174,9 @@ func TestList_IsolatedByOwner(t *testing.T) {
 	user1, user2 := uuid.New(), uuid.New()
 	creds := json.RawMessage(`{"api_key":"k"}`)
 
-	svc.Create(context.Background(), user1, "wb", "Shop A", creds)
-	svc.Create(context.Background(), user1, "ozon", "Shop B", creds)
-	svc.Create(context.Background(), user2, "wb", "Shop C", creds)
+	_, _ = svc.Create(context.Background(), user1, "wb", "Shop A", creds)
+	_, _ = svc.Create(context.Background(), user1, "ozon", "Shop B", creds)
+	_, _ = svc.Create(context.Background(), user2, "wb", "Shop C", creds)
 
 	shops1, _ := svc.List(context.Background(), user1)
 	shops2, _ := svc.List(context.Background(), user2)

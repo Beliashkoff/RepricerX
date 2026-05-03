@@ -23,7 +23,7 @@ func (r *passwordResetTokensPg) Issue(ctx context.Context, userID uuid.UUID, tok
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if _, err = tx.Exec(ctx, `
 		UPDATE password_reset_tokens SET used_at = now()
@@ -47,7 +47,7 @@ func (r *passwordResetTokensPg) Consume(ctx context.Context, tokenHash string, n
 	if err != nil {
 		return uuid.Nil, 0, err
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var userID uuid.UUID
 	err = tx.QueryRow(ctx, `

@@ -24,7 +24,7 @@ func Ping(ctx context.Context, addr string) error {
 	if err != nil {
 		return fmt.Errorf("redis dial: %w", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	deadline := time.Now().Add(2 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {

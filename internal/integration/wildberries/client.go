@@ -55,8 +55,8 @@ func (c *Client) TestAuth(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("wb: request failed: %w", err)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close() //nolint:errcheck
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return integration.ErrUnauthorized
@@ -107,16 +107,16 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("wb: list status %d", resp.StatusCode)
 		}
 
 		var page response
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("wb: decode list: %w", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		for _, card := range page.Cards {
 			price := 0.0
@@ -176,8 +176,8 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 	if err != nil {
 		return fmt.Errorf("wb: update request: %w", err)
 	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+	defer resp.Body.Close() //nolint:errcheck
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("wb: update status %d", resp.StatusCode)

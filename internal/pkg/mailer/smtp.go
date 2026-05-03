@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"strings"
 	"time"
@@ -43,7 +44,7 @@ func (m *SmtpMailer) Send(ctx context.Context, to, subject, htmlBody, textBody s
 	if err != nil {
 		return fmt.Errorf("smtp: tls dial: %w", err)
 	}
-	defer conn.Close()
+	defer conn.Close() //nolint:errcheck
 
 	client, err := smtp.NewClient(conn, m.host)
 	if err != nil {
@@ -54,7 +55,11 @@ func (m *SmtpMailer) Send(ctx context.Context, to, subject, htmlBody, textBody s
 	if err = client.Auth(smtp.PlainAuth("", m.username, m.password, m.host)); err != nil {
 		return fmt.Errorf("smtp: auth: %w", err)
 	}
-	if err = client.Mail(m.from); err != nil {
+	parsed, err := mail.ParseAddress(m.from)
+	if err != nil {
+		return fmt.Errorf("smtp: parse from address: %w", err)
+	}
+	if err = client.Mail(parsed.Address); err != nil {
 		return fmt.Errorf("smtp: MAIL FROM: %w", err)
 	}
 	if err = client.Rcpt(to); err != nil {
@@ -65,11 +70,15 @@ func (m *SmtpMailer) Send(ctx context.Context, to, subject, htmlBody, textBody s
 	if err != nil {
 		return fmt.Errorf("smtp: DATA: %w", err)
 	}
-	defer wc.Close()
 
 	msg := buildMIMEMessage(m.from, to, subject, htmlBody, textBody)
 	if _, err = fmt.Fprint(wc, msg); err != nil {
+		_ = wc.Close()
 		return fmt.Errorf("smtp: write body: %w", err)
+	}
+	// wc.Close() отправляет финальную точку и ждёт 250 от сервера — проверяем.
+	if err = wc.Close(); err != nil {
+		return fmt.Errorf("smtp: close data: %w", err)
 	}
 	return nil
 }
