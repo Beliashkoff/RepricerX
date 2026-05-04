@@ -192,6 +192,87 @@ func (r *importLogPg) Finish(ctx context.Context, id uuid.UUID, status string, t
 	return nil
 }
 
+func (r *importLogPg) Cancel(ctx context.Context, userID, importID uuid.UUID) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var jobID *uuid.UUID
+	err = tx.QueryRow(ctx, `
+		UPDATE import_log
+		SET status = $1, finished_at = NOW()
+		WHERE id = $2 AND user_id = $3
+		  AND status IN ($4, $5)
+		RETURNING job_id`,
+		domain.ImportStatusCanceled, importID, userID,
+		domain.ImportStatusPending, domain.ImportStatusRunning,
+	).Scan(&jobID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	if jobID != nil {
+		_, err = tx.Exec(ctx, `
+			UPDATE background_jobs
+			SET status = 'canceled'::background_job_status,
+			    finished_at = NOW(), canceled_at = NOW(), updated_at = NOW()
+			WHERE id = $1 AND status IN ('pending', 'running', 'retrying')`,
+			*jobID,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *importLogPg) ListErrors(ctx context.Context, userID, importID uuid.UUID, page, perPage int) ([]domain.ImportLogError, int, error) {
+	var errorsJSON []byte
+	err := r.db.QueryRow(ctx,
+		`SELECT errors FROM import_log WHERE id = $1 AND user_id = $2`,
+		importID, userID,
+	).Scan(&errorsJSON)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, 0, ErrNotFound
+		}
+		return nil, 0, err
+	}
+
+	var allErrors []domain.ImportLogError
+	if len(errorsJSON) > 0 {
+		if err := json.Unmarshal(errorsJSON, &allErrors); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	total := len(allErrors)
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	start := (page - 1) * perPage
+	if start >= total {
+		return []domain.ImportLogError{}, total, nil
+	}
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	return allErrors[start:end], total, nil
+}
+
 func scanImportLog(row scannable) (*domain.ImportLogEntry, error) {
 	var entry domain.ImportLogEntry
 	var errorsJSON []byte

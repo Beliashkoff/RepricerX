@@ -46,6 +46,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redischeck"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
@@ -112,20 +113,22 @@ func main() {
 		m = mailer.NewLogMailer(log)
 	}
 
+	limiter := ratelimit.New(5.0)
+
 	shopService := shopsvc.New(shopsRepo, intLogRepo, cfg.AppSecretKey, map[string]shopsvc.MarketplaceFactory{
-		"wb": func(b []byte) (integration.Marketplace, error) {
-			return wildberries.NewClient(b)
+		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(shopID, b, limiter)
 		},
-		"ozon": func(b []byte) (integration.Marketplace, error) {
-			return ozon.NewClient(b)
+		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(shopID, b, limiter)
 		},
 	})
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
-		"wb": func(b []byte) (integration.Marketplace, error) {
-			return wildberries.NewClient(b)
+		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(shopID, b, limiter)
 		},
-		"ozon": func(b []byte) (integration.Marketplace, error) {
-			return ozon.NewClient(b)
+		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(shopID, b, limiter)
 		},
 	})
 

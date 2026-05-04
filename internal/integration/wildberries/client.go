@@ -13,6 +13,7 @@ import (
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 )
 
 const (
@@ -23,12 +24,15 @@ const (
 
 // Client — адаптер Wildberries. Реализует integration.Marketplace.
 type Client struct {
-	apiKey string
-	http   *http.Client
+	shopID  string
+	apiKey  string
+	http    *http.Client
+	limiter *ratelimit.Registry
 }
 
 // NewClient создаёт клиент из JSON-сериализованных WBCredentials.
-func NewClient(credsJSON []byte) (*Client, error) {
+// shopID используется для per-shop rate limiting.
+func NewClient(shopID string, credsJSON []byte, limiter *ratelimit.Registry) (*Client, error) {
 	var creds domain.WBCredentials
 	if err := json.Unmarshal(credsJSON, &creds); err != nil {
 		return nil, fmt.Errorf("wb: parse credentials: %w", err)
@@ -37,21 +41,59 @@ func NewClient(credsJSON []byte) (*Client, error) {
 		return nil, errors.New("wb: api_key is required")
 	}
 	return &Client{
-		apiKey: creds.APIKey,
-		http:   &http.Client{Timeout: 15 * time.Second},
+		shopID:  shopID,
+		apiKey:  creds.APIKey,
+		http:    &http.Client{Timeout: 15 * time.Second},
+		limiter: limiter,
 	}, nil
+}
+
+// doWithRetry выполняет HTTP-запрос с тремя попытками и экспоненциальным backoff.
+// Retry только при сетевых ошибках и HTTP 5xx — 4xx не ретраим.
+func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	delays := []time.Duration{time.Second, 3 * time.Second, 9 * time.Second}
+	var lastErr error
+	for i := 0; i <= len(delays); i++ {
+		if c.limiter != nil {
+			if err := c.limiter.Wait(ctx, c.shopID); err != nil {
+				return nil, err
+			}
+		}
+		req, err := buildReq()
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+		} else if resp.StatusCode >= 500 {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("wb: server error %d", resp.StatusCode)
+		} else {
+			return resp, nil
+		}
+		if i < len(delays) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delays[i]):
+			}
+		}
+	}
+	return nil, lastErr
 }
 
 // TestAuth проверяет валидность API-ключа запросом к /api/v1/info/seller.
 func (c *Client) TestAuth(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		commonBase+"/api/v1/info/seller", nil)
-	if err != nil {
-		return fmt.Errorf("wb: build request: %w", err)
-	}
-	c.setAuth(req)
-
-	resp, err := c.http.Do(req)
+	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			commonBase+"/api/v1/info/seller", nil)
+		if err != nil {
+			return nil, fmt.Errorf("wb: build request: %w", err)
+		}
+		c.setAuth(req)
+		return req, nil
+	})
 	if err != nil {
 		return fmt.Errorf("wb: request failed: %w", err)
 	}
@@ -92,20 +134,26 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 	var result []integration.SKU
 
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			contentBase+"/content/v2/get/cards/list",
-			strings.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("wb: build list request: %w", err)
-		}
-		c.setAuth(req)
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := c.http.Do(req)
+		currentBody := body
+		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				contentBase+"/content/v2/get/cards/list",
+				strings.NewReader(currentBody))
+			if err != nil {
+				return nil, fmt.Errorf("wb: build list request: %w", err)
+			}
+			c.setAuth(req)
+			req.Header.Set("Content-Type", "application/json")
+			return req, nil
+		})
 		if err != nil {
 			return nil, fmt.Errorf("wb: list request: %w", err)
 		}
 
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			_ = resp.Body.Close()
+			return nil, integration.ErrUnauthorized
+		}
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
 			return nil, fmt.Errorf("wb: list status %d", resp.StatusCode)
@@ -163,16 +211,18 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 		return fmt.Errorf("wb: marshal prices: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		pricesBase+"/api/v2/upload/task",
-		strings.NewReader(string(payload)))
-	if err != nil {
-		return fmt.Errorf("wb: build update request: %w", err)
-	}
-	c.setAuth(req)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
+	payloadStr := string(payload)
+	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			pricesBase+"/api/v2/upload/task",
+			strings.NewReader(payloadStr))
+		if err != nil {
+			return nil, fmt.Errorf("wb: build update request: %w", err)
+		}
+		c.setAuth(req)
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
+	})
 	if err != nil {
 		return fmt.Errorf("wb: update request: %w", err)
 	}

@@ -417,6 +417,519 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Отменяет импорт со статусом pending или running. Если импорт уже завершён — возвращает 409.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Отменить импорт",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID импорта",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Импорт отменён"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Импорт уже завершён или не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/imports/{id}/errors": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Возвращает постраничный список ошибок конкретного импорта (только для импортов пользователя).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Детали ошибок импорта",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID импорта",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Номер страницы (с 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Размер страницы (1–100, по умолчанию 20)",
+                        "name": "perPage",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Список ошибок с пагинацией",
+                        "schema": {
+                            "$ref": "#/definitions/transport.importErrorsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Импорт не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Возвращает постраничный список товаров пользователя с фильтрацией и сортировкой.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Список товаров",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Полнотекстовый поиск по названию и SKU",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Фильтр по UUID магазина",
+                        "name": "shopId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Фильтр по статусу: active | archived | out_of_stock",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Фильтр по наличию стратегии",
+                        "name": "hasStrategy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Поле сортировки: name | current_price | updated_at (по умолчанию)",
+                        "name": "sortBy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Направление: asc | desc (по умолчанию)",
+                        "name": "sortDir",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Фильтр: цена не ниже",
+                        "name": "priceFrom",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Фильтр: цена не выше",
+                        "name": "priceTo",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Номер страницы (с 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Размер страницы (1–100, по умолчанию 50)",
+                        "name": "perPage",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Список товаров с пагинацией",
+                        "schema": {
+                            "$ref": "#/definitions/transport.productListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/bulk-patch": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Обновляет min_price/max_price/cost_price для набора товаров (до 100) за один запрос.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Массовое обновление цен",
+                "parameters": [
+                    {
+                        "description": "Список товаров с изменениями",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/transport.bulkPatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Количество обновлённых товаров",
+                        "schema": {
+                            "$ref": "#/definitions/transport.bulkPatchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/export": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Возвращает все товары пользователя (с учётом фильтров) в виде CSV-файла. Лимит 10 000 строк.",
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Экспорт каталога в CSV",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Фильтр по UUID магазина",
+                        "name": "shopId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Фильтр по статусу: active | archived | out_of_stock",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Полнотекстовый поиск",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Поле сортировки",
+                        "name": "sortBy",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Направление: asc | desc",
+                        "name": "sortDir",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Цена не ниже",
+                        "name": "priceFrom",
+                        "in": "query"
+                    },
+                    {
+                        "type": "number",
+                        "description": "Цена не выше",
+                        "name": "priceTo",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV-файл с товарами",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Переводит товар в статус archived. Данные не удаляются.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Архивировать товар (soft-delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Товар архивирован"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Товар не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Устанавливает min_price, max_price и/или cost_price. Передавайте только изменяемые поля; null сбрасывает значение.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Обновить цены товара",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Поля: minPrice, maxPrice, costPrice (number | null)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Обновлённый товар",
+                        "schema": {
+                            "$ref": "#/definitions/transport.productResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Товар не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/shops": {
@@ -712,6 +1225,88 @@
                 }
             }
         },
+        "/api/shops/{id}/products": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Создаёт товар в указанном магазине без обращения к API маркетплейса.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Добавить товар вручную",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID магазина",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Данные товара",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/transport.createProductRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Созданный товар",
+                        "schema": {
+                            "$ref": "#/definitions/transport.productResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Магазин не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "SKU уже существует в этом магазине",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/shops/{id}/products/import": {
             "post": {
                 "security": [
@@ -903,6 +1498,83 @@
         }
     },
     "definitions": {
+        "transport.bulkPatchProductItem": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "costPrice": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "maxPrice": {
+                    "type": "number"
+                },
+                "minPrice": {
+                    "type": "number"
+                }
+            }
+        },
+        "transport.bulkPatchRequest": {
+            "type": "object",
+            "required": [
+                "products"
+            ],
+            "properties": {
+                "products": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/transport.bulkPatchProductItem"
+                    }
+                }
+            }
+        },
+        "transport.bulkPatchResponse": {
+            "type": "object",
+            "properties": {
+                "updated": {
+                    "type": "integer"
+                }
+            }
+        },
+        "transport.createProductRequest": {
+            "type": "object",
+            "required": [
+                "externalSku",
+                "name"
+            ],
+            "properties": {
+                "costPrice": {
+                    "type": "number"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "currentPrice": {
+                    "type": "number"
+                },
+                "externalSku": {
+                    "type": "string"
+                },
+                "maxPrice": {
+                    "type": "number"
+                },
+                "minPrice": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "transport.createShopRequest": {
             "type": "object",
             "required": [
@@ -968,6 +1640,26 @@
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "transport.importErrorsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/transport.importErrorDTO"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "perPage": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -1096,6 +1788,90 @@
                 "status": {
                     "type": "string",
                     "example": "active"
+                }
+            }
+        },
+        "transport.paginationInfo": {
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "integer"
+                },
+                "perPage": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "transport.productListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/transport.productResponse"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/transport.paginationInfo"
+                }
+            }
+        },
+        "transport.productResponse": {
+            "type": "object",
+            "properties": {
+                "costPrice": {
+                    "type": "number"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "currentPrice": {
+                    "type": "number"
+                },
+                "externalSku": {
+                    "type": "string"
+                },
+                "hasStrategy": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lastSyncedAt": {
+                    "type": "string"
+                },
+                "maxPrice": {
+                    "type": "number"
+                },
+                "minPrice": {
+                    "type": "number"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "rating": {
+                    "type": "number"
+                },
+                "reviewsCount": {
+                    "type": "integer"
+                },
+                "shopId": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stockCount": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
                 }
             }
         },

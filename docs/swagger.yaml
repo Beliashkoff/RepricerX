@@ -1,5 +1,56 @@
 basePath: /
 definitions:
+  transport.bulkPatchProductItem:
+    properties:
+      costPrice:
+        type: number
+      id:
+        type: string
+      maxPrice:
+        type: number
+      minPrice:
+        type: number
+    required:
+    - id
+    type: object
+  transport.bulkPatchRequest:
+    properties:
+      products:
+        items:
+          $ref: '#/definitions/transport.bulkPatchProductItem'
+        maxItems: 100
+        minItems: 1
+        type: array
+    required:
+    - products
+    type: object
+  transport.bulkPatchResponse:
+    properties:
+      updated:
+        type: integer
+    type: object
+  transport.createProductRequest:
+    properties:
+      costPrice:
+        type: number
+      currency:
+        type: string
+      currentPrice:
+        type: number
+      externalSku:
+        type: string
+      maxPrice:
+        type: number
+      minPrice:
+        type: number
+      name:
+        type: string
+      status:
+        type: string
+    required:
+    - externalSku
+    - name
+    type: object
   transport.createShopRequest:
     properties:
       credentials:
@@ -45,6 +96,19 @@ definitions:
         type: string
       message:
         type: string
+    type: object
+  transport.importErrorsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/transport.importErrorDTO'
+        type: array
+      page:
+        type: integer
+      perPage:
+        type: integer
+      total:
+        type: integer
     type: object
   transport.importStartResponse:
     properties:
@@ -131,6 +195,61 @@ definitions:
         type: string
       status:
         example: active
+        type: string
+    type: object
+  transport.paginationInfo:
+    properties:
+      page:
+        type: integer
+      perPage:
+        type: integer
+      total:
+        type: integer
+    type: object
+  transport.productListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/transport.productResponse'
+        type: array
+      pagination:
+        $ref: '#/definitions/transport.paginationInfo'
+    type: object
+  transport.productResponse:
+    properties:
+      costPrice:
+        type: number
+      createdAt:
+        type: string
+      currency:
+        type: string
+      currentPrice:
+        type: number
+      externalSku:
+        type: string
+      hasStrategy:
+        type: boolean
+      id:
+        type: string
+      lastSyncedAt:
+        type: string
+      maxPrice:
+        type: number
+      minPrice:
+        type: number
+      name:
+        type: string
+      rating:
+        type: number
+      reviewsCount:
+        type: integer
+      shopId:
+        type: string
+      status:
+        type: string
+      stockCount:
+        type: integer
+      updatedAt:
         type: string
     type: object
   transport.registerRequest:
@@ -497,6 +616,45 @@ paths:
       tags:
       - auth
   /api/imports/{id}:
+    delete:
+      description: Отменяет импорт со статусом pending или running. Если импорт уже
+        завершён — возвращает 409.
+      parameters:
+      - description: UUID импорта
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Импорт отменён
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "409":
+          description: Импорт уже завершён или не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Отменить импорт
+      tags:
+      - products
     get:
       description: Возвращает user-scoped статус импорта, counters и capped список
         ошибок.
@@ -532,6 +690,303 @@ paths:
       security:
       - SessionCookie: []
       summary: Статус импорта SKU
+      tags:
+      - products
+  /api/imports/{id}/errors:
+    get:
+      description: Возвращает постраничный список ошибок конкретного импорта (только
+        для импортов пользователя).
+      parameters:
+      - description: UUID импорта
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Номер страницы (с 1)
+        in: query
+        name: page
+        type: integer
+      - description: Размер страницы (1–100, по умолчанию 20)
+        in: query
+        name: perPage
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список ошибок с пагинацией
+          schema:
+            $ref: '#/definitions/transport.importErrorsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Импорт не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Детали ошибок импорта
+      tags:
+      - products
+  /api/products:
+    get:
+      description: Возвращает постраничный список товаров пользователя с фильтрацией
+        и сортировкой.
+      parameters:
+      - description: Полнотекстовый поиск по названию и SKU
+        in: query
+        name: q
+        type: string
+      - description: Фильтр по UUID магазина
+        in: query
+        name: shopId
+        type: string
+      - description: 'Фильтр по статусу: active | archived | out_of_stock'
+        in: query
+        name: status
+        type: string
+      - description: Фильтр по наличию стратегии
+        in: query
+        name: hasStrategy
+        type: boolean
+      - description: 'Поле сортировки: name | current_price | updated_at (по умолчанию)'
+        in: query
+        name: sortBy
+        type: string
+      - description: 'Направление: asc | desc (по умолчанию)'
+        in: query
+        name: sortDir
+        type: string
+      - description: 'Фильтр: цена не ниже'
+        in: query
+        name: priceFrom
+        type: number
+      - description: 'Фильтр: цена не выше'
+        in: query
+        name: priceTo
+        type: number
+      - description: Номер страницы (с 1)
+        in: query
+        name: page
+        type: integer
+      - description: Размер страницы (1–100, по умолчанию 50)
+        in: query
+        name: perPage
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Список товаров с пагинацией
+          schema:
+            $ref: '#/definitions/transport.productListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Список товаров
+      tags:
+      - products
+  /api/products/{id}:
+    delete:
+      description: Переводит товар в статус archived. Данные не удаляются.
+      parameters:
+      - description: UUID товара
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Товар архивирован
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Товар не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Архивировать товар (soft-delete)
+      tags:
+      - products
+    patch:
+      consumes:
+      - application/json
+      description: Устанавливает min_price, max_price и/или cost_price. Передавайте
+        только изменяемые поля; null сбрасывает значение.
+      parameters:
+      - description: UUID товара
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'Поля: minPrice, maxPrice, costPrice (number | null)'
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Обновлённый товар
+          schema:
+            $ref: '#/definitions/transport.productResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Товар не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Обновить цены товара
+      tags:
+      - products
+  /api/products/bulk-patch:
+    post:
+      consumes:
+      - application/json
+      description: Обновляет min_price/max_price/cost_price для набора товаров (до
+        100) за один запрос.
+      parameters:
+      - description: Список товаров с изменениями
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.bulkPatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Количество обновлённых товаров
+          schema:
+            $ref: '#/definitions/transport.bulkPatchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Массовое обновление цен
+      tags:
+      - products
+  /api/products/export:
+    get:
+      description: Возвращает все товары пользователя (с учётом фильтров) в виде CSV-файла.
+        Лимит 10 000 строк.
+      parameters:
+      - description: Фильтр по UUID магазина
+        in: query
+        name: shopId
+        type: string
+      - description: 'Фильтр по статусу: active | archived | out_of_stock'
+        in: query
+        name: status
+        type: string
+      - description: Полнотекстовый поиск
+        in: query
+        name: q
+        type: string
+      - description: Поле сортировки
+        in: query
+        name: sortBy
+        type: string
+      - description: 'Направление: asc | desc'
+        in: query
+        name: sortDir
+        type: string
+      - description: Цена не ниже
+        in: query
+        name: priceFrom
+        type: number
+      - description: Цена не выше
+        in: query
+        name: priceTo
+        type: number
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV-файл с товарами
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Экспорт каталога в CSV
       tags:
       - products
   /api/shops:
@@ -737,6 +1192,59 @@ paths:
       summary: Обновить магазин
       tags:
       - shops
+  /api/shops/{id}/products:
+    post:
+      consumes:
+      - application/json
+      description: Создаёт товар в указанном магазине без обращения к API маркетплейса.
+      parameters:
+      - description: UUID магазина
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Данные товара
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.createProductRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Созданный товар
+          schema:
+            $ref: '#/definitions/transport.productResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Магазин не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "409":
+          description: SKU уже существует в этом магазине
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Добавить товар вручную
+      tags:
+      - products
   /api/shops/{id}/products/import:
     post:
       description: Создаёт durable background job импорта товаров магазина и возвращает

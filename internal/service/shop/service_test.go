@@ -90,7 +90,7 @@ const testSecret = "test-secret-for-unit-tests"
 
 func newSvc(repo *fakeShopsRepo, testAuthErr error) *shopsvc.Service {
 	factory := func(authErr error) shopsvc.MarketplaceFactory {
-		return func(_ []byte) (integration.Marketplace, error) {
+		return func(_ string, _ []byte) (integration.Marketplace, error) {
 			return &fakeMarketplace{authErr: authErr}, nil
 		}
 	}

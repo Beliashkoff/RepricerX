@@ -84,6 +84,8 @@ func handleProductErr(c *gin.Context, err error) {
 		errResp(c, http.StatusBadRequest, "invalid_price", "Некорректные значения цен")
 	case productsvc.ErrInvalidMarketplace:
 		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
+	case productsvc.ErrImportNotCancelable:
+		errResp(c, http.StatusConflict, "import_not_cancelable", "Импорт не может быть отменён (уже завершён или не найден)")
 	default:
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
 	}

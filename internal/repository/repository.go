@@ -13,10 +13,11 @@ import (
 
 // Sentinel-ошибки — используются сервисами для ветвления без type assertion.
 var (
-	ErrNotFound       = errors.New("not found")
-	ErrEmailTaken     = errors.New("email already taken")
-	ErrDuplicate      = errors.New("duplicate")
-	ErrCooldownActive = errors.New("cooldown active")
+	ErrNotFound            = errors.New("not found")
+	ErrEmailTaken          = errors.New("email already taken")
+	ErrDuplicate           = errors.New("duplicate")
+	ErrCooldownActive      = errors.New("cooldown active")
+	ErrConstraintViolation = errors.New("constraint violation")
 )
 
 // UsersRepository — операции с таблицей users.
@@ -93,6 +94,10 @@ type ProductListFilter struct {
 	HasStrategy *bool
 	Page        int
 	PerPage     int
+	SortBy      string   // "name" | "current_price" | "updated_at" (default)
+	SortDir     string   // "asc" | "desc" (default "desc")
+	PriceFrom   *float64 // фильтр current_price >=
+	PriceTo     *float64 // фильтр current_price <=
 }
 
 type ProductListResult struct {
@@ -139,12 +144,26 @@ type ImportUpsertResult struct {
 	Updated int
 }
 
+// BulkPricePatch описывает патч цен для одного товара в bulk-операции.
+type BulkPricePatch struct {
+	ProductID uuid.UUID
+	MinPrice  OptionalFloat64
+	MaxPrice  OptionalFloat64
+	CostPrice OptionalFloat64
+}
+
 type ProductsRepository interface {
 	Create(ctx context.Context, userID uuid.UUID, input ProductCreateInput) (*domain.Product, error)
 	List(ctx context.Context, userID uuid.UUID, filter ProductListFilter) (*ProductListResult, error)
 	GetByIDForUser(ctx context.Context, userID, productID uuid.UUID) (*domain.Product, error)
 	PatchPrices(ctx context.Context, userID, productID uuid.UUID, patch ProductPricePatch) (*domain.Product, error)
 	UpsertImported(ctx context.Context, shopID uuid.UUID, rows []ProductImportRow) (ImportUpsertResult, error)
+	// SoftDelete переводит товар в статус "archived" (обратимое удаление).
+	SoftDelete(ctx context.Context, userID, productID uuid.UUID) error
+	// BulkPatch атомарно применяет патчи цен к нескольким товарам. Возвращает кол-во затронутых строк.
+	BulkPatch(ctx context.Context, userID uuid.UUID, patches []BulkPricePatch) (int, error)
+	// ExportForUser возвращает до 10 000 товаров пользователя без LIMIT-пагинации (для CSV-экспорта).
+	ExportForUser(ctx context.Context, userID uuid.UUID, filter ProductListFilter) ([]*domain.Product, error)
 }
 
 type ImportLogRepository interface {
@@ -155,6 +174,10 @@ type ImportLogRepository interface {
 	EnqueueProductImport(ctx context.Context, userID, shopID uuid.UUID, maxAttempts int, cooldown time.Duration) (*domain.ImportLogEntry, *domain.BackgroundJob, time.Duration, error)
 	MarkRunning(ctx context.Context, id uuid.UUID) error
 	Finish(ctx context.Context, id uuid.UUID, status string, total, added, updated, skipped, failed int, errors []domain.ImportLogError, finishedAt time.Time) error
+	// Cancel отменяет pending/running импорт и связанный job.
+	Cancel(ctx context.Context, userID, importID uuid.UUID) error
+	// ListErrors возвращает постраничный список ошибок импорта.
+	ListErrors(ctx context.Context, userID, importID uuid.UUID, page, perPage int) ([]domain.ImportLogError, int, error)
 }
 
 type BackgroundJobsRepository interface {

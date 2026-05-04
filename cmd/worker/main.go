@@ -17,6 +17,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/integration/ozon"
 	"github.com/Beliashkoff/RepricerX/internal/integration/wildberries"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,12 +55,13 @@ func main() {
 	productsRepo := repository.NewProductsRepository(pool)
 	importLogRepo := repository.NewImportLogRepository(pool)
 	jobsRepo := repository.NewBackgroundJobsRepository(pool)
+	limiter := ratelimit.New(5.0)
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
-		"wb": func(b []byte) (integration.Marketplace, error) {
-			return wildberries.NewClient(b)
+		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(shopID, b, limiter)
 		},
-		"ozon": func(b []byte) (integration.Marketplace, error) {
-			return ozon.NewClient(b)
+		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(shopID, b, limiter)
 		},
 	})
 
@@ -121,11 +123,11 @@ func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, prod
 	result := productService.ExecuteImportJob(ctx, job)
 	if result.Retryable {
 		runAt := time.Now().UTC().Add(backoff(job.Attempts))
-		if err := jobs.Retry(context.Background(), job.ID, runAt, result.ErrorMessage); err != nil {
+		if err := jobs.Retry(context.Background(), job.ID, runAt, result.InternalError); err != nil {
 			log.Error("worker: retry job", "job_id", job.ID, "error", err)
 			return
 		}
-		log.Warn("worker: job retry scheduled", "job_id", job.ID, "import_id", result.ImportID, "run_at", runAt, "error", result.ErrorMessage)
+		log.Warn("worker: job retry scheduled", "job_id", job.ID, "import_id", result.ImportID, "run_at", runAt, "public_code", result.PublicCode, "diagnostic", result.InternalError)
 		return
 	}
 
@@ -138,11 +140,11 @@ func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, prod
 		return
 	}
 
-	if err := jobs.Fail(context.Background(), job.ID, result.ErrorMessage, result.ResultJSON); err != nil {
+	if err := jobs.Fail(context.Background(), job.ID, result.InternalError, result.ResultJSON); err != nil {
 		log.Error("worker: fail job", "job_id", job.ID, "error", err)
 		return
 	}
-	log.Warn("worker: job failed", "job_id", job.ID, "import_id", result.ImportID, "error", result.ErrorMessage, "duration_ms", time.Since(started).Milliseconds())
+	log.Warn("worker: job failed", "job_id", job.ID, "import_id", result.ImportID, "public_code", result.PublicCode, "diagnostic", result.InternalError, "duration_ms", time.Since(started).Milliseconds())
 }
 
 func backoff(attempt int) time.Duration {

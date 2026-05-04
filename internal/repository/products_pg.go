@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/google/uuid"
@@ -73,7 +72,7 @@ func (r *productsPg) List(ctx context.Context, userID uuid.UUID, filter ProductL
 		FROM products p
 		JOIN shops s ON s.id=p.shop_id
 		`+where+`
-		ORDER BY p.updated_at DESC, p.id DESC
+		`+productOrderBy(filter)+`
 		LIMIT $`+fmt.Sprint(limitPos)+` OFFSET $`+fmt.Sprint(offsetPos),
 		args...,
 	)
@@ -140,46 +139,153 @@ func (r *productsPg) PatchPrices(ctx context.Context, userID, productID uuid.UUI
 }
 
 func (r *productsPg) UpsertImported(ctx context.Context, shopID uuid.UUID, rows []ProductImportRow) (ImportUpsertResult, error) {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return ImportUpsertResult{}, err
+	if len(rows) == 0 {
+		return ImportUpsertResult{}, nil
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var result ImportUpsertResult
-	now := time.Now().UTC()
-	for _, item := range rows {
-		var inserted bool
-		err := tx.QueryRow(ctx, `
+	externalSKUs := make([]string, len(rows))
+	names := make([]string, len(rows))
+	prices := make([]float64, len(rows))
+	currencies := make([]string, len(rows))
+	statuses := make([]string, len(rows))
+	stockCounts := make([]int32, len(rows))
+
+	for i, row := range rows {
+		externalSKUs[i] = row.ExternalSKU
+		names[i] = row.Name
+		prices[i] = row.CurrentPrice
+		currencies[i] = row.Currency
+		statuses[i] = row.Status
+		stockCounts[i] = int32(row.StockCount)
+	}
+
+	var added, updated int
+	err := r.db.QueryRow(ctx, `
+		WITH upsert AS (
 			INSERT INTO products
 				(shop_id, external_sku, name, current_price, currency, status,
 				 stock_count, last_synced_at, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$8)
+			SELECT
+				$1::uuid,
+				unnest($2::text[]),
+				unnest($3::text[]),
+				unnest($4::float8[]),
+				unnest($5::text[]),
+				unnest($6::text[])::product_status,
+				unnest($7::int[]),
+				NOW(), NOW(), NOW()
 			ON CONFLICT (shop_id, external_sku) DO UPDATE SET
-				name=EXCLUDED.name,
-				current_price=EXCLUDED.current_price,
-				currency=EXCLUDED.currency,
-				status=EXCLUDED.status,
-				stock_count=EXCLUDED.stock_count,
-				last_synced_at=EXCLUDED.last_synced_at,
-				updated_at=EXCLUDED.updated_at
-			RETURNING xmax = 0`,
-			shopID, item.ExternalSKU, item.Name, item.CurrentPrice, item.Currency,
-			item.Status, item.StockCount, now,
-		).Scan(&inserted)
-		if err != nil {
-			return ImportUpsertResult{}, err
-		}
-		if inserted {
-			result.Added++
-		} else {
-			result.Updated++
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
+				name           = EXCLUDED.name,
+				current_price  = EXCLUDED.current_price,
+				currency       = EXCLUDED.currency,
+				status         = EXCLUDED.status,
+				stock_count    = EXCLUDED.stock_count,
+				last_synced_at = NOW(),
+				updated_at     = NOW()
+			RETURNING (xmax = 0) AS is_insert
+		)
+		SELECT
+			COUNT(*) FILTER (WHERE is_insert)     AS added,
+			COUNT(*) FILTER (WHERE NOT is_insert) AS updated
+		FROM upsert`,
+		shopID, externalSKUs, names, prices, currencies, statuses, stockCounts,
+	).Scan(&added, &updated)
+	if err != nil {
 		return ImportUpsertResult{}, err
 	}
-	return result, nil
+	return ImportUpsertResult{Added: added, Updated: updated}, nil
+}
+
+func (r *productsPg) SoftDelete(ctx context.Context, userID, productID uuid.UUID) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE products
+		SET status = 'archived'::product_status, updated_at = NOW()
+		WHERE id = $1
+		  AND shop_id IN (SELECT id FROM shops WHERE user_id = $2)
+		  AND status != 'archived'::product_status`,
+		productID, userID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *productsPg) BulkPatch(ctx context.Context, userID uuid.UUID, patches []BulkPricePatch) (int, error) {
+	if len(patches) == 0 {
+		return 0, nil
+	}
+	batch := &pgx.Batch{}
+	for _, p := range patches {
+		batch.Queue(`
+			UPDATE products
+			SET min_price  = CASE WHEN $3 THEN $4 ELSE min_price  END,
+			    max_price  = CASE WHEN $5 THEN $6 ELSE max_price  END,
+			    cost_price = CASE WHEN $7 THEN $8 ELSE cost_price END,
+			    updated_at = NOW()
+			FROM shops s
+			WHERE products.shop_id = s.id
+			  AND products.id = $1
+			  AND s.user_id = $2`,
+			p.ProductID, userID,
+			p.MinPrice.Set, p.MinPrice.Value,
+			p.MaxPrice.Set, p.MaxPrice.Value,
+			p.CostPrice.Set, p.CostPrice.Value,
+		)
+	}
+	br := r.db.SendBatch(ctx, batch)
+	defer br.Close() //nolint:errcheck
+
+	updated := 0
+	for range patches {
+		tag, err := br.Exec()
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+				return 0, ErrConstraintViolation
+			}
+			return 0, err
+		}
+		updated += int(tag.RowsAffected())
+	}
+	return updated, nil
+}
+
+func (r *productsPg) ExportForUser(ctx context.Context, userID uuid.UUID, filter ProductListFilter) ([]*domain.Product, error) {
+	where, args := productWhere(userID, filter)
+	rows, err := r.db.Query(ctx, `
+		SELECT p.id, p.shop_id, p.external_sku, p.name, p.current_price::float8,
+		       p.currency, p.status, p.min_price::float8, p.max_price::float8,
+		       p.cost_price::float8, p.stock_count, p.rating::float8,
+		       p.reviews_count, p.last_synced_at,
+		       EXISTS (
+		         SELECT 1 FROM strategy_assignments sa WHERE sa.product_id=p.id
+		       ) AS has_strategy,
+		       p.created_at, p.updated_at
+		FROM products p
+		JOIN shops s ON s.id=p.shop_id
+		`+where+`
+		`+productOrderBy(filter)+`
+		LIMIT 10000`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []*domain.Product
+	for rows.Next() {
+		p, err := scanProduct(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, p)
+	}
+	return items, rows.Err()
 }
 
 func productWhere(userID uuid.UUID, filter ProductListFilter) (string, []any) {
@@ -209,7 +315,34 @@ func productWhere(userID uuid.UUID, filter ProductListFilter) (string, []any) {
 			clauses = append(clauses, "NOT "+exists)
 		}
 	}
+	if filter.PriceFrom != nil {
+		clauses = append(clauses, fmt.Sprintf("p.current_price >= $%d", next))
+		args = append(args, *filter.PriceFrom)
+		next++
+	}
+	if filter.PriceTo != nil {
+		clauses = append(clauses, fmt.Sprintf("p.current_price <= $%d", next))
+		args = append(args, *filter.PriceTo)
+		next++
+	}
+	_ = next
 	return "WHERE " + strings.Join(clauses, " AND "), args
+}
+
+// productOrderBy строит безопасный ORDER BY по whitelist полей.
+func productOrderBy(filter ProductListFilter) string {
+	dir := "DESC"
+	if strings.ToLower(filter.SortDir) == "asc" {
+		dir = "ASC"
+	}
+	switch filter.SortBy {
+	case "name":
+		return "ORDER BY p.name " + dir + ", p.id DESC"
+	case "current_price":
+		return "ORDER BY p.current_price " + dir + ", p.id DESC"
+	default:
+		return "ORDER BY p.updated_at " + dir + ", p.id DESC"
+	}
 }
 
 func scanProduct(row scannable) (*domain.Product, error) {

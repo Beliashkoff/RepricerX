@@ -95,7 +95,7 @@ func TestMain(m *testing.M) {
 	}
 	testPool = pool
 
-	fakeFactory := shopsvc.MarketplaceFactory(func(_ []byte) (integration.Marketplace, error) {
+	fakeFactory := shopsvc.MarketplaceFactory(func(_ string, _ []byte) (integration.Marketplace, error) {
 		return &fakeMarketplace{}, nil
 	})
 	testShopSvc = shopsvc.New(
@@ -104,7 +104,7 @@ func TestMain(m *testing.M) {
 		testShopSecret,
 		map[string]shopsvc.MarketplaceFactory{"wb": fakeFactory, "ozon": fakeFactory},
 	)
-	productFactory := productsvc.MarketplaceFactory(func(_ []byte) (integration.Marketplace, error) {
+	productFactory := productsvc.MarketplaceFactory(func(_ string, _ []byte) (integration.Marketplace, error) {
 		return &fakeMarketplace{}, nil
 	})
 	testProductSvc = productsvc.New(

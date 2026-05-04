@@ -13,7 +13,8 @@ import { ArrowDown, ArrowUp, TrendingDown, CheckCircle2, AlertCircle } from 'luc
 import { toast } from 'sonner'
 
 export default function Pricing() {
-  const { data: products = [] } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() })
+  const { data: productList } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() })
+  const products = productList?.items ?? []
   const { data: strategies = [] } = useQuery({ queryKey: ['strategies'], queryFn: strategiesApi.list })
 
   const [productId, setProductId] = useState('')

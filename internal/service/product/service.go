@@ -1,7 +1,9 @@
 package product
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,9 +30,11 @@ var (
 	ErrImportCooldown       = errors.New("import cooldown active")
 	ErrImportNotFound       = errors.New("import not found")
 	ErrInvalidMarketplace   = errors.New("invalid marketplace")
+	ErrImportNotCancelable  = errors.New("import cannot be canceled")
 )
 
-type MarketplaceFactory func(credsJSON []byte) (integration.Marketplace, error)
+// MarketplaceFactory создаёт клиент маркетплейса. shopID — ключ для per-shop rate limiting.
+type MarketplaceFactory func(shopID string, credsJSON []byte) (integration.Marketplace, error)
 
 type Service struct {
 	shops      repository.ShopsRepository
@@ -59,6 +63,18 @@ type ListFilter struct {
 	HasStrategy *bool
 	Page        int
 	PerPage     int
+	SortBy      string
+	SortDir     string
+	PriceFrom   *float64
+	PriceTo     *float64
+}
+
+// BulkPatchItem описывает изменение цен одного товара в bulk-операции.
+type BulkPatchItem struct {
+	ProductID uuid.UUID
+	MinPrice  repository.OptionalFloat64
+	MaxPrice  repository.OptionalFloat64
+	CostPrice repository.OptionalFloat64
 }
 
 type PricePatch struct {
@@ -68,11 +84,13 @@ type PricePatch struct {
 }
 
 type ImportJobExecution struct {
-	ImportID     uuid.UUID
-	Status       string
-	Retryable    bool
-	ErrorMessage string
-	ResultJSON   []byte
+	ImportID      uuid.UUID
+	Status        string
+	Retryable     bool
+	PublicCode    string
+	PublicMessage string
+	InternalError string
+	ResultJSON    []byte
 }
 
 type ImportCooldownError struct {
@@ -194,6 +212,7 @@ func (s *Service) GetImport(ctx context.Context, userID, importID uuid.UUID) (*d
 	if err != nil {
 		return nil, fmt.Errorf("product import get: %w", err)
 	}
+	entry.Errors = publicImportLogErrors(entry.Errors)
 	return entry, nil
 }
 
@@ -211,64 +230,70 @@ func (s *Service) getShop(ctx context.Context, userID, shopID uuid.UUID) (*domai
 func (s *Service) ExecuteImportJob(ctx context.Context, job *domain.BackgroundJob) ImportJobExecution {
 	result := ImportJobExecution{Status: domain.ImportStatusFailed}
 	if job.JobType != domain.BackgroundJobTypeSKUImport {
-		result.ErrorMessage = "unsupported job type"
+		result.PublicCode, result.PublicMessage = publicImportError(importErrorUnknown)
+		result.InternalError = "unsupported job type"
 		return result
 	}
 
 	var payload domain.SKUImportJobPayload
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {
-		result.ErrorMessage = "invalid job payload"
+		result.PublicCode, result.PublicMessage = publicImportError(importErrorUnknown)
+		result.InternalError = "invalid job payload"
 		return result
 	}
 	result.ImportID = payload.ImportID
 
 	if err := s.importLogs.MarkRunning(ctx, payload.ImportID); err != nil {
-		result.ErrorMessage = "cannot mark import running"
+		result.PublicCode, result.PublicMessage = publicImportError(importErrorUnknown)
+		result.InternalError = "cannot mark import running"
 		return result
 	}
 
 	shop, err := s.getShop(ctx, payload.RequestedByUserID, payload.ShopID)
 	if err != nil {
-		return s.finishImportFailure(ctx, payload.ImportID, job, 0, "shop_not_found", "shop not found", false)
+		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorUnknown, "shop not found", false)
 	}
 
 	factory, ok := s.factories[shop.Marketplace]
 	if !ok {
-		return s.finishImportFailure(ctx, payload.ImportID, job, 0, "invalid_marketplace", "invalid marketplace", false)
+		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorUnknown, "invalid marketplace", false)
 	}
 
 	credsJSON, err := crypto.Decrypt(shop.CredentialsEncrypted, s.secret)
 	if err != nil {
-		return s.finishImportFailure(ctx, payload.ImportID, job, 0, "credentials_error", "cannot decrypt credentials", false)
+		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorCredentials, "cannot decrypt credentials", false)
 	}
-	client, err := factory(credsJSON)
+	client, err := factory(payload.ShopID.String(), credsJSON)
 	if err != nil {
-		return s.finishImportFailure(ctx, payload.ImportID, job, 0, "adapter_error", "cannot build marketplace adapter", false)
+		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorCredentials, "cannot build marketplace adapter", false)
 	}
 
 	skus, err := client.ListSKUs(ctx)
 	if err != nil {
-		return s.finishImportFailure(ctx, payload.ImportID, job, 0, "adapter_error", sanitizeMessage(err.Error()), true)
+		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorAdapter, "adapter list skus: "+redactImportDiagnostic(err.Error()), true)
 	}
 
 	rows, skipped, validationErrors := normalizeImportRows(skus)
 	upsertResult, err := s.products.UpsertImported(ctx, payload.ShopID, rows)
 	if err != nil {
-		return s.finishImportFailure(ctx, payload.ImportID, job, len(skus), "upsert_failed", "cannot save imported products", true)
+		return s.finishImportFailure(ctx, payload.ImportID, job, len(skus), importErrorUpsert, "cannot save imported products", true)
 	}
 
 	status := domain.ImportStatusSucceeded
 	if len(validationErrors) > 0 {
 		status = domain.ImportStatusPartial
 	}
+	validationErrors = publicImportLogErrors(validationErrors)
 	failed := len(validationErrors)
 	finishedAt := time.Now().UTC()
 	if err := s.importLogs.Finish(ctx, payload.ImportID, status, len(skus), upsertResult.Added, upsertResult.Updated, skipped, failed, validationErrors, finishedAt); err != nil {
 		return ImportJobExecution{
-			ImportID:     payload.ImportID,
-			Status:       domain.ImportStatusFailed,
-			Retryable:    true,
-			ErrorMessage: "cannot finish import log",
+			ImportID:      payload.ImportID,
+			Status:        domain.ImportStatusFailed,
+			Retryable:     true,
+			PublicCode:    importErrorUnknown,
+			PublicMessage: publicImportErrors[importErrorUnknown],
+			InternalError: "cannot finish import log",
 		}
 	}
 	result.Status = status
@@ -277,22 +302,28 @@ func (s *Service) ExecuteImportJob(ctx context.Context, job *domain.BackgroundJo
 }
 
 func (s *Service) finishImportFailure(ctx context.Context, importID uuid.UUID, job *domain.BackgroundJob, total int, code, message string, retryable bool) ImportJobExecution {
+	publicCode, publicMessage := publicImportError(code)
+	internalDiagnostic := redactImportDiagnostic(message)
 	if retryable && job.Attempts < job.MaxAttempts {
 		return ImportJobExecution{
-			ImportID:     importID,
-			Status:       domain.ImportStatusRunning,
-			Retryable:    true,
-			ErrorMessage: message,
+			ImportID:      importID,
+			Status:        domain.ImportStatusRunning,
+			Retryable:     true,
+			PublicCode:    publicCode,
+			PublicMessage: publicMessage,
+			InternalError: internalDiagnostic,
 		}
 	}
-	errs := capImportErrors([]domain.ImportLogError{importError("", code, message)})
+	errs := capImportErrors([]domain.ImportLogError{importError("", publicCode, publicMessage)})
 	_ = s.importLogs.Finish(ctx, importID, domain.ImportStatusFailed, total, 0, 0, 0, len(errs), errs, time.Now().UTC())
 	return ImportJobExecution{
-		ImportID:     importID,
-		Status:       domain.ImportStatusFailed,
-		Retryable:    false,
-		ErrorMessage: message,
-		ResultJSON:   importJobResultJSON(domain.ImportStatusFailed, total, 0, 0, 0, len(errs)),
+		ImportID:      importID,
+		Status:        domain.ImportStatusFailed,
+		Retryable:     false,
+		PublicCode:    publicCode,
+		PublicMessage: publicMessage,
+		InternalError: internalDiagnostic,
+		ResultJSON:    importJobResultJSON(domain.ImportStatusFailed, total, 0, 0, 0, len(errs)),
 	}
 }
 
@@ -346,10 +377,133 @@ func normalizeListFilter(filter ListFilter) (repository.ProductListFilter, error
 	if perPage > 100 {
 		perPage = 100
 	}
+	sortBy := filter.SortBy
+	switch sortBy {
+	case "name", "current_price", "updated_at":
+	default:
+		sortBy = "updated_at"
+	}
+	sortDir := strings.ToLower(filter.SortDir)
+	if sortDir != "asc" {
+		sortDir = "desc"
+	}
 	return repository.ProductListFilter{
 		Query: query, ShopID: filter.ShopID, Status: status,
 		HasStrategy: filter.HasStrategy, Page: page, PerPage: perPage,
+		SortBy: sortBy, SortDir: sortDir,
+		PriceFrom: filter.PriceFrom, PriceTo: filter.PriceTo,
 	}, nil
+}
+
+func (s *Service) SoftDelete(ctx context.Context, userID, productID uuid.UUID) error {
+	err := s.products.SoftDelete(ctx, userID, productID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrProductNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("product soft-delete: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) BulkPatch(ctx context.Context, userID uuid.UUID, items []BulkPatchItem) (int, error) {
+	if len(items) == 0 {
+		return 0, nil
+	}
+	repoItems := make([]repository.BulkPricePatch, 0, len(items))
+	for _, it := range items {
+		if it.MinPrice.Set && it.MinPrice.Value != nil {
+			if err := validateMoney(*it.MinPrice.Value); err != nil {
+				return 0, err
+			}
+		}
+		if it.MaxPrice.Set && it.MaxPrice.Value != nil {
+			if err := validateMoney(*it.MaxPrice.Value); err != nil {
+				return 0, err
+			}
+		}
+		if it.CostPrice.Set && it.CostPrice.Value != nil {
+			if err := validateMoney(*it.CostPrice.Value); err != nil {
+				return 0, err
+			}
+		}
+		repoItems = append(repoItems, repository.BulkPricePatch{
+			ProductID: it.ProductID,
+			MinPrice:  it.MinPrice,
+			MaxPrice:  it.MaxPrice,
+			CostPrice: it.CostPrice,
+		})
+	}
+	updated, err := s.products.BulkPatch(ctx, userID, repoItems)
+	if err != nil {
+		return 0, fmt.Errorf("product bulk-patch: %w", err)
+	}
+	return updated, nil
+}
+
+func (s *Service) ExportCSV(ctx context.Context, userID uuid.UUID, filter ListFilter) ([]byte, error) {
+	repoFilter, err := normalizeListFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	products, err := s.products.ExportForUser(ctx, userID, repoFilter)
+	if err != nil {
+		return nil, fmt.Errorf("product export: %w", err)
+	}
+
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	_ = w.Write([]string{"id", "shop_id", "external_sku", "name", "current_price", "currency", "status", "min_price", "max_price", "cost_price", "updated_at"})
+	for _, p := range products {
+		row := []string{
+			p.ID.String(),
+			p.ShopID.String(),
+			p.ExternalSKU,
+			p.Name,
+			fmt.Sprintf("%.2f", p.CurrentPrice),
+			p.Currency,
+			p.Status,
+			nullableFloat(p.MinPrice),
+			nullableFloat(p.MaxPrice),
+			nullableFloat(p.CostPrice),
+			p.UpdatedAt.Format(time.RFC3339),
+		}
+		_ = w.Write(row)
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, fmt.Errorf("product export csv: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func nullableFloat(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", *v)
+}
+
+func (s *Service) CancelImport(ctx context.Context, userID, importID uuid.UUID) error {
+	err := s.importLogs.Cancel(ctx, userID, importID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrImportNotCancelable
+	}
+	if err != nil {
+		return fmt.Errorf("import cancel: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) GetImportErrors(ctx context.Context, userID, importID uuid.UUID, page, perPage int) ([]domain.ImportLogError, int, error) {
+	errs, total, err := s.importLogs.ListErrors(ctx, userID, importID, page, perPage)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, 0, ErrImportNotFound
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("import errors: %w", err)
+	}
+	return errs, total, nil
 }
 
 func normalizeImportRows(skus []integration.SKU) ([]repository.ProductImportRow, int, []domain.ImportLogError) {
@@ -503,15 +657,4 @@ func importJobResultJSON(status string, total, added, updated, skipped, failed i
 		"failed":  failed,
 	})
 	return payload
-}
-
-func sanitizeMessage(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) > 200 {
-		return value[:200]
-	}
-	if value == "" {
-		return "marketplace adapter failed"
-	}
-	return value
 }

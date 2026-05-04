@@ -74,3 +74,25 @@ type importErrorDTO struct {
 	Code        string `json:"code"`
 	Message     string `json:"message"`
 }
+
+type bulkPatchProductItem struct {
+	ID        string   `json:"id" binding:"required"`
+	MinPrice  *float64 `json:"minPrice"`
+	MaxPrice  *float64 `json:"maxPrice"`
+	CostPrice *float64 `json:"costPrice"`
+}
+
+type bulkPatchRequest struct {
+	Products []bulkPatchProductItem `json:"products" binding:"required,min=1,max=100"`
+}
+
+type bulkPatchResponse struct {
+	Updated int `json:"updated"`
+}
+
+type importErrorsResponse struct {
+	Items   []importErrorDTO `json:"items"`
+	Total   int              `json:"total"`
+	Page    int              `json:"page"`
+	PerPage int              `json:"perPage"`
+}

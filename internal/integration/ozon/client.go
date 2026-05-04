@@ -13,19 +13,23 @@ import (
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 )
 
 const baseURL = "https://api-seller.ozon.ru"
 
 // Client — адаптер Ozon. Реализует integration.Marketplace.
 type Client struct {
+	shopID   string
 	clientID string
 	apiKey   string
 	http     *http.Client
+	limiter  *ratelimit.Registry
 }
 
 // NewClient создаёт клиент из JSON-сериализованных OzonCredentials.
-func NewClient(credsJSON []byte) (*Client, error) {
+// shopID используется для per-shop rate limiting.
+func NewClient(shopID string, credsJSON []byte, limiter *ratelimit.Registry) (*Client, error) {
 	var creds domain.OzonCredentials
 	if err := json.Unmarshal(credsJSON, &creds); err != nil {
 		return nil, fmt.Errorf("ozon: parse credentials: %w", err)
@@ -34,24 +38,60 @@ func NewClient(credsJSON []byte) (*Client, error) {
 		return nil, errors.New("ozon: client_id and api_key are required")
 	}
 	return &Client{
+		shopID:   shopID,
 		clientID: creds.ClientID,
 		apiKey:   creds.APIKey,
 		http:     &http.Client{Timeout: 15 * time.Second},
+		limiter:  limiter,
 	}, nil
+}
+
+// doWithRetry выполняет HTTP-запрос с тремя попытками и экспоненциальным backoff.
+func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	delays := []time.Duration{time.Second, 3 * time.Second, 9 * time.Second}
+	var lastErr error
+	for i := 0; i <= len(delays); i++ {
+		if c.limiter != nil {
+			if err := c.limiter.Wait(ctx, c.shopID); err != nil {
+				return nil, err
+			}
+		}
+		req, err := buildReq()
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			lastErr = err
+		} else if resp.StatusCode >= 500 {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("ozon: server error %d", resp.StatusCode)
+		} else {
+			return resp, nil
+		}
+		if i < len(delays) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delays[i]):
+			}
+		}
+	}
+	return nil, lastErr
 }
 
 // TestAuth проверяет валидность ключей запросом к /v1/product/list с limit=1.
 func (c *Client) TestAuth(ctx context.Context) error {
-	body := `{"filter":{},"last_id":"","limit":1}`
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		baseURL+"/v1/product/list",
-		strings.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("ozon: build request: %w", err)
-	}
-	c.setAuth(req)
-
-	resp, err := c.http.Do(req)
+	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			baseURL+"/v1/product/list",
+			strings.NewReader(`{"filter":{},"last_id":"","limit":1}`))
+		if err != nil {
+			return nil, fmt.Errorf("ozon: build request: %w", err)
+		}
+		c.setAuth(req)
+		return req, nil
+	})
 	if err != nil {
 		return fmt.Errorf("ozon: request failed: %w", err)
 	}
@@ -97,18 +137,24 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 
 	// 1. Получаем список product_id постранично
 	for {
-		reqBody := fmt.Sprintf(`{"filter":{},"last_id":%q,"limit":100}`, lastID)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			baseURL+"/v2/product/list",
-			strings.NewReader(reqBody))
-		if err != nil {
-			return nil, fmt.Errorf("ozon: build list request: %w", err)
-		}
-		c.setAuth(req)
-
-		resp, err := c.http.Do(req)
+		currentLastID := lastID
+		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+			reqBody := fmt.Sprintf(`{"filter":{},"last_id":%q,"limit":100}`, currentLastID)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				baseURL+"/v2/product/list",
+				strings.NewReader(reqBody))
+			if err != nil {
+				return nil, fmt.Errorf("ozon: build list request: %w", err)
+			}
+			c.setAuth(req)
+			return req, nil
+		})
 		if err != nil {
 			return nil, fmt.Errorf("ozon: list request: %w", err)
+		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			_ = resp.Body.Close()
+			return nil, integration.ErrUnauthorized
 		}
 		var page listResponse
 		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
@@ -142,16 +188,18 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 			ids = append(ids, it.ProductID)
 		}
 
-		payload, _ := json.Marshal(map[string]any{"product_id": ids})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			baseURL+"/v2/product/info/list",
-			strings.NewReader(string(payload)))
-		if err != nil {
-			return nil, fmt.Errorf("ozon: build info request: %w", err)
-		}
-		c.setAuth(req)
-
-		resp, err := c.http.Do(req)
+		payloadBytes, _ := json.Marshal(map[string]any{"product_id": ids})
+		payloadStr := string(payloadBytes)
+		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				baseURL+"/v2/product/info/list",
+				strings.NewReader(payloadStr))
+			if err != nil {
+				return nil, fmt.Errorf("ozon: build info request: %w", err)
+			}
+			c.setAuth(req)
+			return req, nil
+		})
 		if err != nil {
 			return nil, fmt.Errorf("ozon: info request: %w", err)
 		}
@@ -203,15 +251,17 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 		return fmt.Errorf("ozon: marshal prices: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		baseURL+"/v1/product/import/prices",
-		strings.NewReader(string(payload)))
-	if err != nil {
-		return fmt.Errorf("ozon: build update request: %w", err)
-	}
-	c.setAuth(req)
-
-	resp, err := c.http.Do(req)
+	payloadStr := string(payload)
+	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+			baseURL+"/v1/product/import/prices",
+			strings.NewReader(payloadStr))
+		if err != nil {
+			return nil, fmt.Errorf("ozon: build update request: %w", err)
+		}
+		c.setAuth(req)
+		return req, nil
+	})
 	if err != nil {
 		return fmt.Errorf("ozon: update request: %w", err)
 	}

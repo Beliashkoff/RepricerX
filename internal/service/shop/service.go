@@ -21,8 +21,8 @@ var (
 	ErrAuthFailed         = errors.New("marketplace auth failed")
 )
 
-// MarketplaceFactory создаёт клиент маркетплейса из JSON-credentials.
-type MarketplaceFactory func(credsJSON []byte) (integration.Marketplace, error)
+// MarketplaceFactory создаёт клиент маркетплейса. shopID — ключ для per-shop rate limiting.
+type MarketplaceFactory func(shopID string, credsJSON []byte) (integration.Marketplace, error)
 
 // UpdatePatch содержит изменяемые поля магазина (nil = не менять).
 type UpdatePatch struct {
@@ -166,7 +166,7 @@ func (s *Service) TestConnection(ctx context.Context, userID, shopID uuid.UUID) 
 		return fmt.Errorf("shop test: decrypt: %w", err)
 	}
 
-	client, err := factory(credsJSON)
+	client, err := factory(shop.ID.String(), credsJSON)
 	if err != nil {
 		return fmt.Errorf("shop test: build client: %w", err)
 	}

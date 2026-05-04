@@ -46,6 +46,9 @@ export interface OzonCredentials {
 }
 
 // Products
+export type ProductSortField = 'name' | 'current_price' | 'updated_at'
+export type SortDir = 'asc' | 'desc'
+
 export interface Product {
   id: string
   shop_id: string
@@ -57,7 +60,41 @@ export interface Product {
   min_price: number | null
   max_price: number | null
   cost_price: number | null
+  stock_count: number
+  rating: number | null
+  reviews_count: number
+  last_synced_at: string | null
+  has_strategy: boolean
+  created_at: string
   updated_at: string
+}
+
+export interface ProductListParams {
+  page?: number
+  perPage?: number
+  shopId?: string
+  q?: string
+  status?: ProductStatus
+  sortBy?: ProductSortField
+  sortDir?: SortDir
+  priceFrom?: number
+  priceTo?: number
+}
+
+export interface ProductListResult {
+  items: Product[]
+  pagination: {
+    page: number
+    perPage: number
+    total: number
+  }
+}
+
+export interface BulkPatchItem {
+  id: string
+  minPrice?: number | null
+  maxPrice?: number | null
+  costPrice?: number | null
 }
 
 export interface ImportStart {
@@ -89,6 +126,13 @@ export interface ImportStatus {
   errors: ImportErrorItem[]
   startedAt: string
   finishedAt: string | null
+}
+
+export interface ImportErrorsPage {
+  items: ImportErrorItem[]
+  total: number
+  page: number
+  perPage: number
 }
 
 // Strategies

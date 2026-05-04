@@ -4,8 +4,11 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,18 +192,79 @@ func TestProductImportUpsertAndFailure(t *testing.T) {
 	}
 
 	failShopID := createTestShop(t, client, "import_fail")
-	testListSKUsErr = errors.New("marketplace unavailable")
+	maliciousAdapterError := `adapter failed: Authorization: Bearer SECRET-TOKEN api_key=AKIA123 password=hunter2 client_id=my-client Cookie: session=secretcookie url=https://example.test/import?token=querysecret#frag payload={"credential":"full-payload"}`
+	testListSKUsErr = errors.New(maliciousAdapterError)
 	startFail := doJSON(t, client, http.MethodPost, "/api/shops/"+failShopID+"/products/import", nil, withOrigin())
 	mustStatus(t, startFail, http.StatusAccepted)
 	var failResp map[string]any
 	mustDecode(t, startFail, &failResp)
+	failJobID := failResp["jobId"].(string)
 	_, err := testPool.Exec(context.Background(),
-		`UPDATE background_jobs SET max_attempts=1 WHERE id=$1`, failResp["jobId"].(string))
+		`UPDATE background_jobs SET max_attempts=1 WHERE id=$1`, failJobID)
 	if err != nil {
 		t.Fatalf("set max attempts: %v", err)
 	}
 	runNextImportJob(t)
-	waitImportStatus(t, failResp["importId"].(string), "failed")
+	failImportID := failResp["importId"].(string)
+	waitImportStatus(t, failImportID, "failed")
+
+	failPoll := doJSON(t, client, http.MethodGet, "/api/imports/"+failImportID, nil)
+	mustStatus(t, failPoll, http.StatusOK)
+	failPollJSON, err := io.ReadAll(failPoll.Body)
+	if err != nil {
+		t.Fatalf("read fail poll response: %v", err)
+	}
+	var failStatus struct {
+		Errors []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(failPollJSON, &failStatus); err != nil {
+		t.Fatalf("decode fail poll response: %v", err)
+	}
+	if len(failStatus.Errors) != 1 {
+		t.Fatalf("want one public import error, got %#v", failStatus.Errors)
+	}
+	if failStatus.Errors[0].Code != "adapter_error" {
+		t.Fatalf("want adapter_error, got %q", failStatus.Errors[0].Code)
+	}
+	const publicAdapterMessage = "Import failed because the external shop adapter returned an error."
+	if failStatus.Errors[0].Message != publicAdapterMessage {
+		t.Fatalf("want public adapter message, got %q", failStatus.Errors[0].Message)
+	}
+
+	var importErrorsJSON []byte
+	err = testPool.QueryRow(context.Background(),
+		`SELECT errors FROM import_log WHERE id=$1`, failImportID).Scan(&importErrorsJSON)
+	if err != nil {
+		t.Fatalf("get import errors: %v", err)
+	}
+	var lastError string
+	err = testPool.QueryRow(context.Background(),
+		`SELECT last_error FROM background_jobs WHERE id=$1`, failJobID).Scan(&lastError)
+	if err != nil {
+		t.Fatalf("get background job last_error: %v", err)
+	}
+	for _, leak := range []string{
+		"SECRET-TOKEN",
+		"AKIA123",
+		"hunter2",
+		"my-client",
+		"secretcookie",
+		"querysecret",
+		"full-payload",
+	} {
+		if strings.Contains(string(failPollJSON), leak) {
+			t.Fatalf("poll response leaked adapter detail %q: %s", leak, failPollJSON)
+		}
+		if strings.Contains(string(importErrorsJSON), leak) {
+			t.Fatalf("import_log errors leaked adapter detail %q: %s", leak, importErrorsJSON)
+		}
+		if strings.Contains(lastError, leak) {
+			t.Fatalf("background_jobs last_error leaked adapter detail %q: %s", leak, lastError)
+		}
+	}
 }
 
 func runNextImportJob(t *testing.T) {
@@ -213,7 +277,7 @@ func runNextImportJob(t *testing.T) {
 	}
 	result := testProductSvc.ExecuteImportJob(ctx, job)
 	if result.Retryable {
-		if err := jobs.Retry(ctx, job.ID, time.Now().UTC(), result.ErrorMessage); err != nil {
+		if err := jobs.Retry(ctx, job.ID, time.Now().UTC(), result.InternalError); err != nil {
 			t.Fatalf("retry job: %v", err)
 		}
 		return
@@ -224,7 +288,7 @@ func runNextImportJob(t *testing.T) {
 		}
 		return
 	}
-	if err := jobs.Fail(ctx, job.ID, result.ErrorMessage, result.ResultJSON); err != nil {
+	if err := jobs.Fail(ctx, job.ID, result.InternalError, result.ResultJSON); err != nil {
 		t.Fatalf("fail job: %v", err)
 	}
 }

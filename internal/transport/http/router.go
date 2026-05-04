@@ -65,7 +65,9 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/shops", shopH.List)
 		protected.GET("/shops/:id", shopH.Get)
 		protected.GET("/products", productH.List)
+		protected.GET("/products/export", productH.Export)
 		protected.GET("/imports/:id", productH.GetImport)
+		protected.GET("/imports/:id/errors", productH.GetImportErrors)
 
 		mutating := protected.Group("", requireCSRF)
 		{
@@ -79,6 +81,9 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.POST("/shops/:id/products/import", productH.StartImport)
 			mutating.POST("/shops/:id/products", productH.Create)
 			mutating.PATCH("/products/:id", productH.Patch)
+			mutating.DELETE("/products/:id", productH.Delete)
+			mutating.POST("/products/bulk-patch", productH.BulkPatch)
+			mutating.DELETE("/imports/:id", productH.CancelImport)
 		}
 	}
 }
