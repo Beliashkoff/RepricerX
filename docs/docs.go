@@ -196,6 +196,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/auth/password/forgot": {
+            "post": {
+                "description": "Выдаёт одноразовый токен сброса пароля и отправляет письмо, если email принадлежит активному аккаунту.\nВсегда возвращает 202 — сервер не раскрывает, существует ли аккаунт с таким email.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Запрос сброса пароля",
+                "parameters": [
+                    {
+                        "description": "Email пользователя",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/transport.forgotPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Письмо отправлено или запрос принят"
+                    }
+                }
+            }
+        },
+        "/api/auth/password/reset": {
+            "post": {
+                "description": "Принимает одноразовый токен и новый пароль. При успехе отзывает все сессии пользователя.",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Сброс пароля",
+                "parameters": [
+                    {
+                        "description": "Токен и новый пароль",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/transport.resetPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Пароль изменён, сессии отозваны"
+                    },
+                    "400": {
+                        "description": "Неверный запрос, слабый пароль или недействительный токен",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/register": {
             "post": {
                 "description": "Создаёт нового пользователя. На указанный email отправляется письмо для подтверждения.\nВойти можно только после перехода по ссылке из письма (активация аккаунта).",
@@ -295,6 +363,64 @@ const docTemplate = `{
                 "responses": {
                     "302": {
                         "description": "Редирект на фронтенд с verified=0 (токен не найден, уже использован или истёк)"
+                    }
+                }
+            }
+        },
+        "/api/imports/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Возвращает user-scoped статус импорта, counters и capped список ошибок.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Статус импорта SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID импорта",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Статус импорта",
+                        "schema": {
+                            "$ref": "#/definitions/transport.importStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
                     }
                 }
             }
@@ -592,6 +718,82 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/shops/{id}/products/import": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Создаёт durable background job импорта товаров магазина и возвращает ID импорта для polling.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "products"
+                ],
+                "summary": "Запустить импорт SKU",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID магазина",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Импорт поставлен в очередь",
+                        "schema": {
+                            "$ref": "#/definitions/transport.importStartResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Импорт уже выполняется",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Cooldown импорта",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/shops/{id}/test": {
             "post": {
                 "security": [
@@ -749,6 +951,102 @@ const docTemplate = `{
                 }
             }
         },
+        "transport.forgotPasswordRequest": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "example": "user@example.com"
+                }
+            }
+        },
+        "transport.importErrorDTO": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "externalSku": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "transport.importStartResponse": {
+            "type": "object",
+            "properties": {
+                "importId": {
+                    "type": "string"
+                },
+                "jobId": {
+                    "type": "string"
+                },
+                "pollUrl": {
+                    "type": "string"
+                },
+                "shopId": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "transport.importStatusResponse": {
+            "type": "object",
+            "properties": {
+                "added": {
+                    "type": "integer"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/transport.importErrorDTO"
+                    }
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "finishedAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "jobId": {
+                    "type": "string"
+                },
+                "jobStatus": {
+                    "type": "string"
+                },
+                "shopId": {
+                    "type": "string"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "updated": {
+                    "type": "integer"
+                }
+            }
+        },
         "transport.loginRequest": {
             "type": "object",
             "required": [
@@ -850,6 +1148,30 @@ const docTemplate = `{
                 }
             }
         },
+        "transport.resetPasswordRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "newPassword": {
+                    "type": "string",
+                    "example": "NewValidPass123!"
+                },
+                "password": {
+                    "type": "string",
+                    "example": "NewValidPass123!"
+                },
+                "passwordConfirmation": {
+                    "type": "string",
+                    "example": "NewValidPass123!"
+                },
+                "token": {
+                    "type": "string",
+                    "example": "q83s..."
+                }
+            }
+        },
         "transport.shopResponse": {
             "type": "object",
             "properties": {
@@ -944,7 +1266,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "RepricerX API",
-	Description:      "REST API сервиса автоматического управления ценами на маркетплейсах Wildberries и Ozon.\n\n## Аутентификация\nПосле успешного входа (POST /api/auth/login) сервер устанавливает HttpOnly-cookie `rx_session`.\nБраузер отправляет его автоматически; при работе через curl/Postman передавайте `-b \"rx_session=<token>\"`.\n\n## CSRF-защита\nВсе мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`\nи `/api/auth/verification/resend`, проверяют заголовок `Origin`.\nОн должен совпадать с одним из разрешённых источников (настраивается через `ALLOWED_ORIGINS`).\nSwagger UI выставляет `Origin` автоматически.",
+	Description:      "REST API сервиса автоматического управления ценами на маркетплейсах Wildberries и Ozon.\n\n## Аутентификация\nПосле успешного входа (POST /api/auth/login) сервер устанавливает HttpOnly-cookie `rx_session`.\nБраузер отправляет его автоматически; при работе через curl/Postman передавайте `-b \"rx_session=<token>\"`.\n\n## CSRF-защита\nВсе мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`,\n`/api/auth/verification/resend`, `/api/auth/password/forgot` и `/api/auth/password/reset`, проверяют заголовок `Origin`.\nОн должен совпадать с одним из разрешённых источников (настраивается через `ALLOWED_ORIGINS`).\nSwagger UI выставляет `Origin` автоматически.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

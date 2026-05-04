@@ -13,8 +13,10 @@ import (
 
 // Sentinel-ошибки — используются сервисами для ветвления без type assertion.
 var (
-	ErrNotFound   = errors.New("not found")
-	ErrEmailTaken = errors.New("email already taken")
+	ErrNotFound       = errors.New("not found")
+	ErrEmailTaken     = errors.New("email already taken")
+	ErrDuplicate      = errors.New("duplicate")
+	ErrCooldownActive = errors.New("cooldown active")
 )
 
 // UsersRepository — операции с таблицей users.
@@ -82,4 +84,82 @@ type IntegrationLogRepository interface {
 	Create(ctx context.Context, e *domain.IntegrationLogEntry) error
 	// DeleteOlderThan удаляет записи старше cutoff; возвращает число удалённых строк.
 	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+type ProductListFilter struct {
+	Query       string
+	ShopID      *uuid.UUID
+	Status      string
+	HasStrategy *bool
+	Page        int
+	PerPage     int
+}
+
+type ProductListResult struct {
+	Items   []*domain.Product
+	Total   int
+	Page    int
+	PerPage int
+}
+
+type ProductCreateInput struct {
+	ShopID       uuid.UUID
+	ExternalSKU  string
+	Name         string
+	CurrentPrice float64
+	Currency     string
+	Status       string
+	MinPrice     *float64
+	MaxPrice     *float64
+	CostPrice    *float64
+}
+
+type ProductPricePatch struct {
+	MinPrice  OptionalFloat64
+	MaxPrice  OptionalFloat64
+	CostPrice OptionalFloat64
+}
+
+type OptionalFloat64 struct {
+	Set   bool
+	Value *float64
+}
+
+type ProductImportRow struct {
+	ExternalSKU  string
+	Name         string
+	CurrentPrice float64
+	Currency     string
+	Status       string
+	StockCount   int
+}
+
+type ImportUpsertResult struct {
+	Added   int
+	Updated int
+}
+
+type ProductsRepository interface {
+	Create(ctx context.Context, userID uuid.UUID, input ProductCreateInput) (*domain.Product, error)
+	List(ctx context.Context, userID uuid.UUID, filter ProductListFilter) (*ProductListResult, error)
+	GetByIDForUser(ctx context.Context, userID, productID uuid.UUID) (*domain.Product, error)
+	PatchPrices(ctx context.Context, userID, productID uuid.UUID, patch ProductPricePatch) (*domain.Product, error)
+	UpsertImported(ctx context.Context, shopID uuid.UUID, rows []ProductImportRow) (ImportUpsertResult, error)
+}
+
+type ImportLogRepository interface {
+	HasRunning(ctx context.Context, shopID uuid.UUID) (bool, error)
+	Create(ctx context.Context, entry *domain.ImportLogEntry) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.ImportLogEntry, error)
+	GetForUser(ctx context.Context, userID, importID uuid.UUID) (*domain.ImportLogEntry, error)
+	EnqueueProductImport(ctx context.Context, userID, shopID uuid.UUID, maxAttempts int, cooldown time.Duration) (*domain.ImportLogEntry, *domain.BackgroundJob, time.Duration, error)
+	MarkRunning(ctx context.Context, id uuid.UUID) error
+	Finish(ctx context.Context, id uuid.UUID, status string, total, added, updated, skipped, failed int, errors []domain.ImportLogError, finishedAt time.Time) error
+}
+
+type BackgroundJobsRepository interface {
+	ClaimNext(ctx context.Context, queue, workerID string, lockTTL time.Duration) (*domain.BackgroundJob, error)
+	Succeed(ctx context.Context, id uuid.UUID, result []byte) error
+	Retry(ctx context.Context, id uuid.UUID, runAt time.Time, lastError string) error
+	Fail(ctx context.Context, id uuid.UUID, lastError string, result []byte) error
 }

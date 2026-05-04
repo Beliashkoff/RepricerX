@@ -6,6 +6,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
+	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,7 @@ import (
 type RouterConfig struct {
 	AuthSvc        *auth.Service
 	ShopSvc        *shopsvc.Service
+	ProductSvc     *productsvc.Service
 	UsersRepo      repository.UsersRepository
 	Audit          *auditlog.Logger
 	AllowedOrigins []string
@@ -38,6 +40,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 
 	authH := NewAuthHandler(cfg.AuthSvc, cfg.SecureCookie, cfg.FrontendURL)
 	shopH := NewShopHandler(cfg.ShopSvc)
+	productH := NewProductHandler(cfg.ProductSvc)
 
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -61,6 +64,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/auth/me", authH.Me)
 		protected.GET("/shops", shopH.List)
 		protected.GET("/shops/:id", shopH.Get)
+		protected.GET("/products", productH.List)
+		protected.GET("/imports/:id", productH.GetImport)
 
 		mutating := protected.Group("", requireCSRF)
 		{
@@ -71,6 +76,9 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.PATCH("/shops/:id", shopH.Update)
 			mutating.DELETE("/shops/:id", shopH.Delete)
 			mutating.POST("/shops/:id/test", shopH.TestConnection)
+			mutating.POST("/shops/:id/products/import", productH.StartImport)
+			mutating.POST("/shops/:id/products", productH.Create)
+			mutating.PATCH("/products/:id", productH.Patch)
 		}
 	}
 }

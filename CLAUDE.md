@@ -188,6 +188,7 @@ docker-compose.prod.yaml
 - [ ] `PATCH /api/products/:id` — редактирование min_price/max_price/cost_price.
 
 ### Этап 4. Стратегии (2 дня)
+
 **Покрывает ТЗ:** 4.1.1.5.
 - [ ] Таблицы `strategies`, `strategy_assignments`.
 - [ ] 4 типа: `below_median_pct`, `min_competitor_plus_step`, `min_margin_pct`, `fixed`. Валидация диапазонов (X: 0–20, Y: 0–500, Z: 0–90 и т.д.).

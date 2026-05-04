@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AppLayout, PageHeader } from '@/components/layout/AppLayout'
@@ -6,26 +6,70 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { productsApi } from '@/api/products'
-import type { Product } from '@/types/api'
+import { shopsApi } from '@/api/shops'
+import type { ImportStatus, Product } from '@/types/api'
 import { formatPrice, formatDate } from '@/lib/utils'
 import { Download, Search, RefreshCw } from 'lucide-react'
 
 function StatusBadge({ status }: { status: Product['status'] }) {
-  const map = { active: 'success', archived: 'secondary', paused: 'warning' } as const
-  const labels = { active: 'Активен', archived: 'В архиве', paused: 'На паузе' }
+  const map = { active: 'success', archived: 'secondary', out_of_stock: 'warning' } as const
+  const labels = { active: 'Активен', archived: 'В архиве', out_of_stock: 'Нет в наличии' }
   return <Badge variant={map[status]}>{labels[status]}</Badge>
 }
 
+const terminalImportStatuses: ImportStatus['status'][] = ['succeeded', 'partial', 'failed', 'canceled']
+
 export default function Products() {
   const [search, setSearch] = useState('')
-  const { data: products = [], isLoading, refetch } = useQuery({
-    queryKey: ['products'],
-    queryFn: () => productsApi.list(),
+  const [selectedShopId, setSelectedShopId] = useState('')
+  const [activeImportId, setActiveImportId] = useState<string | null>(null)
+
+  const { data: shops = [] } = useQuery({
+    queryKey: ['shops'],
+    queryFn: shopsApi.list,
   })
 
+  const { data: products = [], isLoading, refetch } = useQuery({
+    queryKey: ['products', selectedShopId],
+    queryFn: () => productsApi.list({ shopId: selectedShopId || undefined }),
+  })
+
+  useEffect(() => {
+    if (!selectedShopId && shops.length > 0) {
+      setSelectedShopId(shops[0].id)
+    }
+  }, [selectedShopId, shops])
+
+  const importStatusQuery = useQuery({
+    queryKey: ['product-import', activeImportId],
+    queryFn: () => productsApi.getImport(activeImportId as string),
+    enabled: Boolean(activeImportId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status && terminalImportStatuses.includes(status) ? false : 3000
+    },
+  })
+
+  useEffect(() => {
+    const status = importStatusQuery.data?.status
+    if (!status || !terminalImportStatuses.includes(status)) return
+    if (status === 'succeeded') toast.success('Импорт завершён')
+    if (status === 'partial') toast.warning('Импорт завершён с пропущенными SKU')
+    if (status === 'failed') toast.error('Импорт завершился с ошибкой')
+    if (status === 'canceled') toast.error('Импорт отменён')
+    refetch()
+    setActiveImportId(null)
+  }, [importStatusQuery.data?.status, refetch])
+
   const importMutation = useMutation({
-    mutationFn: () => productsApi.startImport(''),
-    onSuccess: () => toast.success('Импорт запущен. Товары появятся через несколько минут.'),
+    mutationFn: () => {
+      if (!selectedShopId) throw new Error('Выберите магазин для импорта')
+      return productsApi.startImport(selectedShopId)
+    },
+    onSuccess: (data) => {
+      setActiveImportId(data.importId)
+      toast.success('Импорт поставлен в очередь')
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -41,13 +85,24 @@ export default function Products() {
         description="Каталог SKU из подключённых магазинов"
         action={
           <div className="flex gap-2">
+            <select
+              className="h-9 rounded-md border border-[#e6e6e6] bg-white px-3 text-sm text-[#111]"
+              value={selectedShopId}
+              onChange={e => setSelectedShopId(e.target.value)}
+            >
+              {shops.length === 0 ? (
+                <option value="">Нет магазинов</option>
+              ) : (
+                shops.map(shop => <option key={shop.id} value={shop.id}>{shop.name}</option>)
+              )}
+            </select>
             <Button variant="secondary" size="sm" className="gap-1.5" onClick={() => refetch()}>
               <RefreshCw className="h-3.5 w-3.5" />
               Обновить
             </Button>
-            <Button size="sm" className="gap-1.5" disabled={importMutation.isPending} onClick={() => importMutation.mutate()}>
+            <Button size="sm" className="gap-1.5" disabled={importMutation.isPending || Boolean(activeImportId) || !selectedShopId} onClick={() => importMutation.mutate()}>
               <Download className="h-3.5 w-3.5" />
-              {importMutation.isPending ? 'Импорт...' : 'Импортировать'}
+              {activeImportId ? 'Импорт идёт...' : importMutation.isPending ? 'Импорт...' : 'Импортировать'}
             </Button>
           </div>
         }
@@ -110,7 +165,11 @@ export default function Products() {
 
         <div className="px-4 py-3 border-t border-[#f5f5f5] text-xs text-[#aaa]">
           Показано {filtered.length} из {products.length} товаров
-          <span className="ml-2 text-[#ffcc00] font-medium">⚠ Данные mock — бэкенд в разработке</span>
+          {importStatusQuery.data && (
+            <span className="ml-2 text-[#ffcc00] font-medium">
+              Импорт: {importStatusQuery.data.status}, добавлено {importStatusQuery.data.added}, обновлено {importStatusQuery.data.updated}
+            </span>
+          )}
         </div>
       </div>
     </AppLayout>

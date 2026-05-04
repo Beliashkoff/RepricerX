@@ -1,9 +1,12 @@
 package transport
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
+	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	"github.com/gin-gonic/gin"
 )
@@ -48,6 +51,39 @@ func handleShopErr(c *gin.Context, err error) {
 		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
 	case shopsvc.ErrAuthFailed:
 		errResp(c, http.StatusUnprocessableEntity, "auth_failed", "Ошибка авторизации в маркетплейсе")
+	default:
+		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
+	}
+}
+
+func handleProductErr(c *gin.Context, err error) {
+	var cooldownErr productsvc.ImportCooldownError
+	if errors.As(err, &cooldownErr) {
+		if cooldownErr.RetryAfter > 0 {
+			c.Header("Retry-After", strconv.Itoa(int(cooldownErr.RetryAfter.Seconds())))
+		}
+		errResp(c, http.StatusTooManyRequests, "import_cooldown", "Повторный импорт для магазина временно недоступен")
+		return
+	}
+	switch err {
+	case productsvc.ErrShopNotFound:
+		errResp(c, http.StatusNotFound, "shop_not_found", "Магазин не найден")
+	case productsvc.ErrProductNotFound:
+		errResp(c, http.StatusNotFound, "product_not_found", "Товар не найден")
+	case productsvc.ErrDuplicateSKU:
+		errResp(c, http.StatusConflict, "duplicate_sku", "SKU уже существует в этом магазине")
+	case productsvc.ErrImportAlreadyRunning:
+		errResp(c, http.StatusConflict, "import_already_running", "Импорт для магазина уже выполняется")
+	case productsvc.ErrImportCooldown:
+		errResp(c, http.StatusTooManyRequests, "import_cooldown", "Повторный импорт для магазина временно недоступен")
+	case productsvc.ErrImportNotFound:
+		errResp(c, http.StatusNotFound, "import_not_found", "Импорт не найден")
+	case productsvc.ErrInvalidProduct:
+		errResp(c, http.StatusBadRequest, "invalid_product", "Некорректные данные товара")
+	case productsvc.ErrInvalidPrice:
+		errResp(c, http.StatusBadRequest, "invalid_price", "Некорректные значения цен")
+	case productsvc.ErrInvalidMarketplace:
+		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
 	default:
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
 	}

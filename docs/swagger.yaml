@@ -29,6 +29,69 @@ definitions:
       error:
         $ref: '#/definitions/transport.errorDetail'
     type: object
+  transport.forgotPasswordRequest:
+    properties:
+      email:
+        example: user@example.com
+        type: string
+    required:
+    - email
+    type: object
+  transport.importErrorDTO:
+    properties:
+      code:
+        type: string
+      externalSku:
+        type: string
+      message:
+        type: string
+    type: object
+  transport.importStartResponse:
+    properties:
+      importId:
+        type: string
+      jobId:
+        type: string
+      pollUrl:
+        type: string
+      shopId:
+        type: string
+      startedAt:
+        type: string
+      status:
+        type: string
+    type: object
+  transport.importStatusResponse:
+    properties:
+      added:
+        type: integer
+      errors:
+        items:
+          $ref: '#/definitions/transport.importErrorDTO'
+        type: array
+      failed:
+        type: integer
+      finishedAt:
+        type: string
+      id:
+        type: string
+      jobId:
+        type: string
+      jobStatus:
+        type: string
+      shopId:
+        type: string
+      skipped:
+        type: integer
+      startedAt:
+        type: string
+      status:
+        type: string
+      total:
+        type: integer
+      updated:
+        type: integer
+    type: object
   transport.loginRequest:
     properties:
       email:
@@ -100,6 +163,23 @@ definitions:
     required:
     - email
     type: object
+  transport.resetPasswordRequest:
+    properties:
+      newPassword:
+        example: NewValidPass123!
+        type: string
+      password:
+        example: NewValidPass123!
+        type: string
+      passwordConfirmation:
+        example: NewValidPass123!
+        type: string
+      token:
+        example: q83s...
+        type: string
+    required:
+    - token
+    type: object
   transport.shopResponse:
     properties:
       autoUpdateEnabled:
@@ -166,8 +246,8 @@ info:
     Браузер отправляет его автоматически; при работе через curl/Postman передавайте `-b "rx_session=<token>"`.
 
     ## CSRF-защита
-    Все мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`
-    и `/api/auth/verification/resend`, проверяют заголовок `Origin`.
+    Все мутирующие эндпоинты (POST/PATCH/DELETE), кроме `/api/auth/register`, `/api/auth/login`,
+    `/api/auth/verification/resend`, `/api/auth/password/forgot` и `/api/auth/password/reset`, проверяют заголовок `Origin`.
     Он должен совпадать с одним из разрешённых источников (настраивается через `ALLOWED_ORIGINS`).
     Swagger UI выставляет `Origin` автоматически.
   title: RepricerX API
@@ -294,6 +374,53 @@ paths:
       summary: Обновить профиль
       tags:
       - auth
+  /api/auth/password/forgot:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Выдаёт одноразовый токен сброса пароля и отправляет письмо, если email принадлежит активному аккаунту.
+        Всегда возвращает 202 — сервер не раскрывает, существует ли аккаунт с таким email.
+      parameters:
+      - description: Email пользователя
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.forgotPasswordRequest'
+      responses:
+        "202":
+          description: Письмо отправлено или запрос принят
+      summary: Запрос сброса пароля
+      tags:
+      - auth
+  /api/auth/password/reset:
+    post:
+      consumes:
+      - application/json
+      description: Принимает одноразовый токен и новый пароль. При успехе отзывает
+        все сессии пользователя.
+      parameters:
+      - description: Токен и новый пароль
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.resetPasswordRequest'
+      responses:
+        "204":
+          description: Пароль изменён, сессии отозваны
+        "400":
+          description: Неверный запрос, слабый пароль или недействительный токен
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      summary: Сброс пароля
+      tags:
+      - auth
   /api/auth/register:
     post:
       consumes:
@@ -369,6 +496,44 @@ paths:
       summary: Подтверждение email
       tags:
       - auth
+  /api/imports/{id}:
+    get:
+      description: Возвращает user-scoped статус импорта, counters и capped список
+        ошибок.
+      parameters:
+      - description: UUID импорта
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Статус импорта
+          schema:
+            $ref: '#/definitions/transport.importStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Статус импорта SKU
+      tags:
+      - products
   /api/shops:
     get:
       description: Возвращает все магазины, принадлежащие аутентифицированному пользователю.
@@ -572,6 +737,56 @@ paths:
       summary: Обновить магазин
       tags:
       - shops
+  /api/shops/{id}/products/import:
+    post:
+      description: Создаёт durable background job импорта товаров магазина и возвращает
+        ID импорта для polling.
+      parameters:
+      - description: UUID магазина
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Импорт поставлен в очередь
+          schema:
+            $ref: '#/definitions/transport.importStartResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "409":
+          description: Импорт уже выполняется
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "429":
+          description: Cooldown импорта
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Запустить импорт SKU
+      tags:
+      - products
   /api/shops/{id}/test:
     post:
       description: |-

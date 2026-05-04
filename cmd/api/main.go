@@ -49,6 +49,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redischeck"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
@@ -97,6 +98,9 @@ func main() {
 	verRepo := repository.NewEmailVerificationsRepository(pool)
 	resetRepo := repository.NewPasswordResetTokensRepository(pool)
 	shopsRepo := repository.NewShopsRepository(pool)
+	productsRepo := repository.NewProductsRepository(pool)
+	importLogRepo := repository.NewImportLogRepository(pool)
+	jobsRepo := repository.NewBackgroundJobsRepository(pool)
 	intLogRepo := repository.NewIntegrationLogRepository(pool)
 
 	audit := auditlog.New(log)
@@ -109,6 +113,14 @@ func main() {
 	}
 
 	shopService := shopsvc.New(shopsRepo, intLogRepo, cfg.AppSecretKey, map[string]shopsvc.MarketplaceFactory{
+		"wb": func(b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(b)
+		},
+		"ozon": func(b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(b)
+		},
+	})
+	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
 		"wb": func(b []byte) (integration.Marketplace, error) {
 			return wildberries.NewClient(b)
 		},
@@ -145,6 +157,7 @@ func main() {
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        shopService,
+		ProductSvc:     productService,
 		UsersRepo:      usersRepo,
 		Audit:          audit,
 		AllowedOrigins: cfg.AllowedOrigins,

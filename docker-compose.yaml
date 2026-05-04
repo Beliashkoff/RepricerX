@@ -78,6 +78,12 @@ services:
       REDIS_ADDR: redis:6379
       APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-only-change-me-32-bytes-minimum}
       ENVIRONMENT: ${ENVIRONMENT:-dev}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-2s}
+      WORKER_LOCK_TTL: ${WORKER_LOCK_TTL:-5m}
+      WORKER_JOB_TIMEOUT: ${WORKER_JOB_TIMEOUT:-2m}
+      WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-5}
+      WORKER_SHUTDOWN_TIMEOUT: ${WORKER_SHUTDOWN_TIMEOUT:-30s}
     depends_on:
       db:
         condition: service_healthy

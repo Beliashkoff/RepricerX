@@ -2,7 +2,9 @@
 
 export type Marketplace = 'wb' | 'ozon'
 export type ShopStatus = 'active' | 'error' | 'pending' | 'disabled'
-export type ProductStatus = 'active' | 'archived' | 'paused'
+export type ProductStatus = 'active' | 'archived' | 'out_of_stock'
+export type ImportStatusValue = 'pending' | 'running' | 'succeeded' | 'partial' | 'failed' | 'canceled'
+export type JobStatusValue = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'retrying'
 export type StrategyType = 'below_median_pct' | 'min_competitor_plus_step' | 'min_margin_pct' | 'fixed'
 export type FallbackPolicy = 'keep_current' | 'set_fixed' | 'set_min'
 export type PriceChangeStatus = 'success' | 'failed' | 'skipped'
@@ -56,6 +58,37 @@ export interface Product {
   max_price: number | null
   cost_price: number | null
   updated_at: string
+}
+
+export interface ImportStart {
+  importId: string
+  jobId?: string
+  shopId: string
+  status: ImportStatusValue
+  startedAt: string
+  pollUrl: string
+}
+
+export interface ImportErrorItem {
+  externalSku?: string
+  code: string
+  message: string
+}
+
+export interface ImportStatus {
+  id: string
+  jobId?: string
+  shopId: string
+  status: ImportStatusValue
+  jobStatus?: JobStatusValue
+  total: number
+  added: number
+  updated: number
+  skipped: number
+  failed: number
+  errors: ImportErrorItem[]
+  startedAt: string
+  finishedAt: string | null
 }
 
 // Strategies

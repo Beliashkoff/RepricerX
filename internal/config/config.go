@@ -40,6 +40,15 @@ type Config struct {
 	SMTPFrom             string
 	VerificationURLBase  string // frontend-маршрут верификации
 	PasswordResetURLBase string // frontend-маршрут сброса пароля
+
+	// Worker
+	WorkerID              string
+	WorkerConcurrency     int
+	WorkerPollInterval    time.Duration
+	WorkerLockTTL         time.Duration
+	WorkerJobTimeout      time.Duration
+	WorkerMaxAttempts     int
+	WorkerShutdownTimeout time.Duration
 }
 
 func Load() (*Config, error) {
@@ -56,6 +65,7 @@ func Load() (*Config, error) {
 		SMTPFrom:             getEnv("SMTP_FROM", ""),
 		VerificationURLBase:  getEnv("VERIFICATION_URL_BASE", "http://localhost:5173/verify"),
 		PasswordResetURLBase: getEnv("PASSWORD_RESET_URL_BASE", "http://localhost:5173/reset-password"),
+		WorkerID:             getEnv("WORKER_ID", ""),
 	}
 
 	// Разбираем список разрешённых Origin (через запятую)
@@ -85,6 +95,31 @@ func Load() (*Config, error) {
 	}
 
 	cfg.TrustProxyHeaders, _ = strconv.ParseBool(getEnv("TRUST_PROXY_HEADERS", "false"))
+
+	cfg.WorkerConcurrency, err = parsePositiveIntEnv("WORKER_CONCURRENCY", 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.WorkerMaxAttempts, err = parsePositiveIntEnv("WORKER_MAX_ATTEMPTS", 5)
+	if err != nil {
+		return nil, err
+	}
+	cfg.WorkerPollInterval, err = time.ParseDuration(getEnv("WORKER_POLL_INTERVAL", "2s"))
+	if err != nil {
+		return nil, fmt.Errorf("WORKER_POLL_INTERVAL: %w", err)
+	}
+	cfg.WorkerLockTTL, err = time.ParseDuration(getEnv("WORKER_LOCK_TTL", "5m"))
+	if err != nil {
+		return nil, fmt.Errorf("WORKER_LOCK_TTL: %w", err)
+	}
+	cfg.WorkerJobTimeout, err = time.ParseDuration(getEnv("WORKER_JOB_TIMEOUT", "2m"))
+	if err != nil {
+		return nil, fmt.Errorf("WORKER_JOB_TIMEOUT: %w", err)
+	}
+	cfg.WorkerShutdownTimeout, err = time.ParseDuration(getEnv("WORKER_SHUTDOWN_TIMEOUT", "30s"))
+	if err != nil {
+		return nil, fmt.Errorf("WORKER_SHUTDOWN_TIMEOUT: %w", err)
+	}
 
 	if cfg.Environment == "prod" {
 		if cfg.MailerMode != "smtp" {
@@ -123,6 +158,14 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parsePositiveIntEnv(key string, fallback int) (int, error) {
+	value, err := strconv.Atoi(getEnv(key, strconv.Itoa(fallback)))
+	if err != nil || value < 1 {
+		return 0, fmt.Errorf("%s должен быть положительным числом", key)
+	}
+	return value, nil
 }
 
 // mustEnv возвращает значение переменной или паникует при старте — лучше узнать сразу.

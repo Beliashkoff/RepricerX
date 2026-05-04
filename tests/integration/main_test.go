@@ -25,6 +25,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
@@ -48,12 +49,15 @@ const (
 const testShopSecret = "integration-test-secret-key-32b!"
 
 var (
-	testPool    *pgxpool.Pool
-	testSrv     *httptest.Server
-	testMailer  *capturingMailer
-	testShopSvc *shopsvc.Service
+	testPool       *pgxpool.Pool
+	testSrv        *httptest.Server
+	testMailer     *capturingMailer
+	testShopSvc    *shopsvc.Service
+	testProductSvc *productsvc.Service
 	// allowAuthFail управляет тем, вернёт ли fakeMarketplace ошибку auth.
 	testShopAuthFail bool
+	testSKUs         []integration.SKU
+	testListSKUsErr  error
 )
 
 // fakeMarketplace — заглушка адаптера маркетплейса для интеграционных тестов.
@@ -65,7 +69,14 @@ func (f *fakeMarketplace) TestAuth(_ context.Context) error {
 	}
 	return nil
 }
-func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error) { return nil, nil }
+func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error) {
+	if testListSKUsErr != nil {
+		return nil, testListSKUsErr
+	}
+	out := make([]integration.SKU, len(testSKUs))
+	copy(out, testSKUs)
+	return out, nil
+}
 func (f *fakeMarketplace) UpdatePrices(_ context.Context, _ []integration.PriceUpdate) error {
 	return nil
 }
@@ -92,6 +103,17 @@ func TestMain(m *testing.M) {
 		repository.NewIntegrationLogRepository(pool),
 		testShopSecret,
 		map[string]shopsvc.MarketplaceFactory{"wb": fakeFactory, "ozon": fakeFactory},
+	)
+	productFactory := productsvc.MarketplaceFactory(func(_ []byte) (integration.Marketplace, error) {
+		return &fakeMarketplace{}, nil
+	})
+	testProductSvc = productsvc.New(
+		repository.NewShopsRepository(pool),
+		repository.NewProductsRepository(pool),
+		repository.NewImportLogRepository(pool),
+		repository.NewBackgroundJobsRepository(pool),
+		testShopSecret,
+		map[string]productsvc.MarketplaceFactory{"wb": productFactory, "ozon": productFactory},
 	)
 
 	testMailer = &capturingMailer{}
@@ -147,6 +169,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        testShopSvc,
+		ProductSvc:     testProductSvc,
 		Audit:          audit,
 		AllowedOrigins: []string{testOrigin},
 		TrustProxy:     false,
@@ -161,10 +184,12 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 func truncate(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(), `
-		TRUNCATE TABLE integration_log, shops, password_reset_tokens, email_verifications, sessions, users
+		TRUNCATE TABLE background_jobs, import_log, integration_log, products, shops, password_reset_tokens, email_verifications, sessions, users
 		RESTART IDENTITY CASCADE
 	`)
 	testShopAuthFail = false
+	testSKUs = nil
+	testListSKUsErr = nil
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
