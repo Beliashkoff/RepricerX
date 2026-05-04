@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"mime"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -90,7 +91,7 @@ func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
 
 	sb.WriteString("From: " + from + "\r\n")
 	sb.WriteString("To: " + to + "\r\n")
-	sb.WriteString("Subject: " + sanitizeHeader(subject) + "\r\n")
+	sb.WriteString("Subject: " + encodeHeader(subject) + "\r\n")
 	sb.WriteString("MIME-Version: 1.0\r\n")
 	sb.WriteString(`Content-Type: multipart/alternative; boundary="` + boundary + `"` + "\r\n\r\n")
 
@@ -109,4 +110,8 @@ func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
 // sanitizeHeader удаляет CR и LF из значения заголовка, предотвращая header injection.
 func sanitizeHeader(s string) string {
 	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
+}
+
+func encodeHeader(s string) string {
+	return mime.QEncoding.Encode("UTF-8", sanitizeHeader(s))
 }

@@ -56,13 +56,19 @@ func TestBuildMIMEMessage_Headers(t *testing.T) {
 	tests := []struct{ name, got, want string }{
 		{"From", m.Header.Get("From"), from},
 		{"To", m.Header.Get("To"), to},
-		{"Subject", m.Header.Get("Subject"), subject},
 		{"MIME-Version", m.Header.Get("MIME-Version"), "1.0"},
 	}
 	for _, tt := range tests {
 		if tt.got != tt.want {
 			t.Errorf("заголовок %s: получили %q, ожидали %q", tt.name, tt.got, tt.want)
 		}
+	}
+	decodedSubject, err := (&mime.WordDecoder{}).DecodeHeader(m.Header.Get("Subject"))
+	if err != nil {
+		t.Fatalf("decode subject: %v", err)
+	}
+	if decodedSubject != subject {
+		t.Errorf("заголовок Subject: получили %q, ожидали %q", decodedSubject, subject)
 	}
 }
 
@@ -162,6 +168,28 @@ func TestBuildMIMEMessage_SubjectInjectionBlocked(t *testing.T) {
 	subj := m.Header.Get("Subject")
 	if strings.ContainsAny(subj, "\r\n") {
 		t.Errorf("Subject содержит CR/LF: %q", subj)
+	}
+}
+
+func TestBuildMIMEMessage_SubjectIsRFC2047Encoded(t *testing.T) {
+	subject := "Сброс пароля — RepricerX"
+	msg := buildMIMEMessage("f@x.com", "t@x.com", subject, "", "")
+
+	m, err := mail.ReadMessage(strings.NewReader(msg))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	rawSubject := m.Header.Get("Subject")
+	if strings.Contains(rawSubject, "Сброс") {
+		t.Fatalf("Subject должен быть закодирован, получили raw UTF-8: %q", rawSubject)
+	}
+	decodedSubject, err := (&mime.WordDecoder{}).DecodeHeader(rawSubject)
+	if err != nil {
+		t.Fatalf("decode subject: %v", err)
+	}
+	if decodedSubject != subject {
+		t.Fatalf("decoded subject = %q, want %q", decodedSubject, subject)
 	}
 }
 

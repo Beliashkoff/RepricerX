@@ -58,11 +58,11 @@ func Load() (*Config, error) {
 		DatabaseURL:          mustEnv("DATABASE_URL"),
 		RedisAddr:            getEnv("REDIS_ADDR", "localhost:6379"),
 		AppSecretKey:         mustEnv("APP_SECRET_KEY"),
-		MailerMode:           getEnv("MAILER_MODE", "log"),
-		SMTPHost:             getEnv("SMTP_HOST", ""),
-		SMTPUser:             getEnv("SMTP_USER", ""),
+		MailerMode:           strings.ToLower(strings.TrimSpace(getEnv("MAILER_MODE", "log"))),
+		SMTPHost:             strings.TrimSpace(getEnv("SMTP_HOST", "")),
+		SMTPUser:             strings.TrimSpace(getEnv("SMTP_USER", "")),
 		SMTPPassword:         getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:             getEnv("SMTP_FROM", ""),
+		SMTPFrom:             strings.TrimSpace(getEnv("SMTP_FROM", "")),
 		VerificationURLBase:  getEnv("VERIFICATION_URL_BASE", "http://localhost:5173/verify"),
 		PasswordResetURLBase: getEnv("PASSWORD_RESET_URL_BASE", "http://localhost:5173/reset-password"),
 		WorkerID:             getEnv("WORKER_ID", ""),
@@ -121,12 +121,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("WORKER_SHUTDOWN_TIMEOUT: %w", err)
 	}
 
+	switch cfg.MailerMode {
+	case "log":
+	case "smtp":
+		if cfg.SMTPHost == "" || cfg.SMTPUser == "" || cfg.SMTPPassword == "" || cfg.SMTPFrom == "" {
+			return nil, fmt.Errorf("SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM обязательны при MAILER_MODE=smtp")
+		}
+	default:
+		return nil, fmt.Errorf("MAILER_MODE должен быть log или smtp")
+	}
+
 	if cfg.Environment == "prod" {
 		if cfg.MailerMode != "smtp" {
 			return nil, fmt.Errorf("MAILER_MODE=smtp обязателен в prod")
-		}
-		if cfg.SMTPHost == "" || cfg.SMTPUser == "" || cfg.SMTPPassword == "" || cfg.SMTPFrom == "" {
-			return nil, fmt.Errorf("SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM обязательны в prod при MAILER_MODE=smtp")
 		}
 		if err := validateProdFrontendURL("VERIFICATION_URL_BASE", cfg.VerificationURLBase); err != nil {
 			return nil, err

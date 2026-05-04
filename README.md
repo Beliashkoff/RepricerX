@@ -61,7 +61,7 @@ make down    # остановить dev-сервисы
 > Все ошибки возвращаются в формате `{"error":{"code":"...","message":"..."}}`.  
 > Мутирующие защищённые эндпоинты проверяют заголовок `Origin` (same-origin CSRF).
 
-Для писем подтверждения и сброса пароля используется `MAILER_MODE=log` в dev или `MAILER_MODE=smtp` в prod. Для SMTP нужны `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Ссылка сброса пароля настраивается через `PASSWORD_RESET_URL_BASE`, например `https://example.com/reset-password`; токен добавляется в fragment (`#token=...`) и не должен попадать в серверные логи.
+Для писем подтверждения и сброса пароля используется `MAILER_MODE=log` в dev или `MAILER_MODE=smtp` в prod. В dev-режиме письмо не отправляется наружу, а пишется в логи API, которые можно посмотреть через `make logs` или `docker compose logs api`. На сервере запуск идёт через `docker-compose.prod.yaml`; для реальной SMTP-отправки в `.env.prod` нужны `MAILER_MODE=smtp`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Ссылка сброса пароля настраивается через `PASSWORD_RESET_URL_BASE`, например `https://example.com/reset-password`; токен добавляется в fragment (`#token=...`) и в prod не должен попадать в серверные логи.
 
 ## Магазины `/api/shops`
 
