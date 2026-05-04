@@ -82,6 +82,14 @@ services:
       REDIS_ADDR: redis:6379
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       ENVIRONMENT: prod
+      MAILER_MODE: ${MAILER_MODE:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-smtp.yandex.ru}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      VERIFICATION_URL_BASE: https://${DOMAIN}/verify
+      PASSWORD_RESET_URL_BASE: https://${DOMAIN}/reset-password
       WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
       WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-2s}
       WORKER_LOCK_TTL: ${WORKER_LOCK_TTL:-5m}
