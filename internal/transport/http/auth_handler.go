@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
@@ -216,7 +217,9 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	var req forgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err == nil {
 		go func(email string) {
-			_ = h.svc.ForgotPassword(context.Background(), email)
+			if err := h.svc.ForgotPassword(context.Background(), email); err != nil {
+				slog.Error("forgot_password failed", "error", err)
+			}
 		}(req.Email)
 	}
 	c.JSON(http.StatusAccepted, gin.H{

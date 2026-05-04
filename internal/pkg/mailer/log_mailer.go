@@ -19,7 +19,7 @@ func (m *LogMailer) Send(_ context.Context, to, subject, _, textBody string) err
 	m.log.Info("email (dev/log mode)",
 		slog.String("to", to),
 		slog.String("subject", subject),
-		slog.Int("text_len", len(textBody)),
+		slog.String("body", textBody),
 	)
 	return nil
 }
