@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Mail } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { authApi } from '@/api/auth'
 import { Button } from '@/components/ui/button'
@@ -38,14 +38,16 @@ function SocialButton({ icon, label, onClick }: { icon: React.ReactNode; label: 
 }
 
 export default function Register() {
-  const { user, isLoading, login } = useAuth()
-  const navigate = useNavigate()
+  const { user, isLoading } = useAuth()
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [errors, setErrors] = useState<{ displayName?: string; email?: string; password?: string }>({})
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null)
+  const [resending, setResending] = useState(false)
+  const [recentlySent, setRecentlySent] = useState(false)
 
   if (!isLoading && user) return <Navigate to="/dashboard" replace />
 
@@ -68,8 +70,7 @@ export default function Register() {
     setSubmitting(true)
     try {
       await authApi.register(email, password, displayName.trim())
-      await login(email, password)
-      navigate('/dashboard')
+      setRegisteredEmail(email)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Ошибка регистрации')
     } finally {
@@ -77,8 +78,63 @@ export default function Register() {
     }
   }
 
+  async function handleResend() {
+    if (!registeredEmail || recentlySent) return
+    setResending(true)
+    try {
+      await authApi.resendVerification(registeredEmail)
+      toast.success('Письмо отправлено')
+      setRecentlySent(true)
+      setTimeout(() => setRecentlySent(false), 60_000)
+    } catch {
+      toast.error('Не удалось отправить письмо, попробуйте позже')
+    } finally {
+      setResending(false)
+    }
+  }
+
   function comingSoon() {
     toast.info('Скоро будет доступно')
+  }
+
+  if (registeredEmail) {
+    return (
+      <div className="min-h-screen bg-[#f7f8fa] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <Link to="/" className="inline-flex items-center gap-2 font-bold text-xl text-[#111]">
+              <span className="w-9 h-9 rounded-xl bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold">R</span>
+              RepricerX
+            </Link>
+          </div>
+          <div className="bg-white rounded-3xl border border-[#e6e6e6] p-8 shadow-sm text-center">
+            <div className="w-14 h-14 rounded-full bg-[#eff6ff] flex items-center justify-center mx-auto mb-4">
+              <Mail className="h-7 w-7 text-[#2563eb]" />
+            </div>
+            <h2 className="text-xl font-bold text-[#111] mb-2">Проверьте почту</h2>
+            <p className="text-sm text-[#666] mb-6">
+              Письмо со ссылкой для подтверждения отправлено на{' '}
+              <strong className="text-[#111]">{registeredEmail}</strong>.
+              Ссылка действует 24 часа.
+            </p>
+            <Button
+              onClick={handleResend}
+              disabled={resending || recentlySent}
+              variant="outline"
+              className="w-full"
+            >
+              {resending ? 'Отправляем...' : recentlySent ? 'Письмо отправлено' : 'Отправить письмо ещё раз'}
+            </Button>
+            <p className="text-sm text-[#666] mt-4">
+              Уже подтвердили?{' '}
+              <Link to="/login" className="text-[#111] font-medium hover:underline">
+                Войти
+              </Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

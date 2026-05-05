@@ -14,6 +14,8 @@ export const authApi = {
     apiClient.post<User>('/auth/login', { email, password }).then(r => r.data),
   register: (email: string, password: string, displayName: string) =>
     apiClient.post('/auth/register', { email, password, displayName }),
+  resendVerification: (email: string) =>
+    apiClient.post('/auth/verification/resend', { email }),
   forgotPassword: (email: string) =>
     apiClient.post('/auth/password/forgot', { email }),
   resetPassword: (token: string, password: string, passwordConfirmation: string) =>

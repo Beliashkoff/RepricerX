@@ -92,6 +92,8 @@ func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
 	sb.WriteString("From: " + from + "\r\n")
 	sb.WriteString("To: " + to + "\r\n")
 	sb.WriteString("Subject: " + encodeHeader(subject) + "\r\n")
+	sb.WriteString("Date: " + time.Now().UTC().Format("Mon, 02 Jan 2006 15:04:05 +0000") + "\r\n")
+	sb.WriteString("Message-ID: " + buildMessageID(from) + "\r\n")
 	sb.WriteString("MIME-Version: 1.0\r\n")
 	sb.WriteString(`Content-Type: multipart/alternative; boundary="` + boundary + `"` + "\r\n\r\n")
 
@@ -105,6 +107,16 @@ func buildMIMEMessage(from, to, subject, htmlBody, textBody string) string {
 
 	sb.WriteString("--" + boundary + "--\r\n")
 	return sb.String()
+}
+
+func buildMessageID(from string) string {
+	domain := "mail"
+	if addr, err := mail.ParseAddress(from); err == nil {
+		if parts := strings.Split(addr.Address, "@"); len(parts) == 2 {
+			domain = parts[1]
+		}
+	}
+	return fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), domain)
 }
 
 // sanitizeHeader удаляет CR и LF из значения заголовка, предотвращая header injection.
