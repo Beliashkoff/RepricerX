@@ -8,6 +8,9 @@ import (
 // ErrUnauthorized возвращается адаптером если API-ключ отклонён маркетплейсом.
 var ErrUnauthorized = errors.New("marketplace: unauthorized")
 
+// ErrRateLimited возвращается адаптером при превышении лимита запросов (HTTP 429).
+var ErrRateLimited = errors.New("marketplace: rate limited")
+
 // SKU — товарная позиция, полученная от маркетплейса.
 type SKU struct {
 	ExternalSKU  string

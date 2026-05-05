@@ -19,6 +19,7 @@ var (
 	ErrShopNotFound       = errors.New("shop not found")
 	ErrInvalidMarketplace = errors.New("invalid marketplace")
 	ErrAuthFailed         = errors.New("marketplace auth failed")
+	ErrRateLimited        = errors.New("shop: rate limited by marketplace")
 )
 
 // MarketplaceFactory создаёт клиент маркетплейса. shopID — ключ для per-shop rate limiting.
@@ -190,6 +191,8 @@ func (s *Service) TestConnection(ctx context.Context, userID, shopID uuid.UUID) 
 		logEntry.ErrorText = errText
 		if errors.Is(testErr, integration.ErrUnauthorized) {
 			testErr = ErrAuthFailed
+		} else if errors.Is(testErr, integration.ErrRateLimited) {
+			testErr = ErrRateLimited
 		}
 	}
 

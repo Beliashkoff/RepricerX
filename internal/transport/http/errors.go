@@ -51,6 +51,9 @@ func handleShopErr(c *gin.Context, err error) {
 		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
 	case shopsvc.ErrAuthFailed:
 		errResp(c, http.StatusUnprocessableEntity, "auth_failed", "Ошибка авторизации в маркетплейсе")
+	case shopsvc.ErrRateLimited:
+		errResp(c, http.StatusTooManyRequests, "marketplace_rate_limited",
+			"Маркетплейс временно ограничил запросы, повторите позже")
 	default:
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
 	}

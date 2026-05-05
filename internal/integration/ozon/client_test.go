@@ -2,6 +2,7 @@ package ozon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,7 @@ func checkOzonAuth(t *testing.T, r *http.Request) {
 
 func TestOzon_TestAuth_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/product/list" {
+		if r.URL.Path != "/v1/seller/info" {
 			t.Errorf("неожиданный путь: %s", r.URL.Path)
 		}
 		checkOzonAuth(t, r)
@@ -61,6 +62,18 @@ func TestOzon_TestAuth_Success(t *testing.T) {
 	err := newTestClient(ts.URL).TestAuth(t.Context())
 	if err != nil {
 		t.Fatalf("ожидали nil, получили: %v", err)
+	}
+}
+
+func TestOzon_TestAuth_RateLimited(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer ts.Close()
+
+	err := newTestClient(ts.URL).TestAuth(t.Context())
+	if !errors.Is(err, integration.ErrRateLimited) {
+		t.Fatalf("HTTP 429: ожидали ErrRateLimited, получили %v", err)
 	}
 }
 
@@ -90,7 +103,7 @@ func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v2/product/list":
+		case "/v3/product/list":
 			listCalled++
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
@@ -104,7 +117,7 @@ func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 				},
 			})
 
-		case "/v2/product/info/list":
+		case "/v3/product/info/list":
 			infoCalled++
 			// Проверяем, что клиент передал product_id из первой фазы.
 			var body map[string]any
@@ -114,8 +127,9 @@ func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 				t.Errorf("info/list: ожидали 2 product_id, получили %d", len(ids))
 			}
 			w.Header().Set("Content-Type", "application/json")
+			// v3: items на корневом уровне, не в result
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-				"result": []map[string]any{
+				"items": []map[string]any{
 					{"product_id": 11, "offer_id": "SKU-A", "name": "Товар А", "price": "1299.00"},
 					{"product_id": 22, "offer_id": "SKU-B", "name": "Товар Б", "price": "599.50"},
 				},
@@ -133,10 +147,10 @@ func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 		t.Fatalf("ListSKUs: %v", err)
 	}
 	if listCalled != 1 {
-		t.Errorf("ожидали 1 запрос к /v2/product/list, сделано %d", listCalled)
+		t.Errorf("ожидали 1 запрос к /v3/product/list, сделано %d", listCalled)
 	}
 	if infoCalled != 1 {
-		t.Errorf("ожидали 1 запрос к /v2/product/info/list, сделано %d", infoCalled)
+		t.Errorf("ожидали 1 запрос к /v3/product/info/list, сделано %d", infoCalled)
 	}
 	if len(skus) != 2 {
 		t.Fatalf("ожидали 2 SKU, получили %d", len(skus))
@@ -162,16 +176,16 @@ func TestOzon_ListSKUs_PriceFromString(t *testing.T) {
 		t.Run(tc.raw, func(t *testing.T) {
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/v2/product/list":
+				case "/v3/product/list":
 					json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 						"result": map[string]any{
 							"items": []map[string]any{{"product_id": 1, "offer_id": "SKU-1"}},
 							"total": 1,
 						},
 					})
-				case "/v2/product/info/list":
+				case "/v3/product/info/list":
 					json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-						"result": []map[string]any{
+						"items": []map[string]any{
 							{"product_id": 1, "offer_id": "SKU-1", "name": "Товар", "price": tc.raw},
 						},
 					})
@@ -196,16 +210,16 @@ func TestOzon_ListSKUs_PriceFromString(t *testing.T) {
 func TestOzon_ListSKUs_InvalidPrice_ReturnsError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v2/product/list":
+		case "/v3/product/list":
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 				"result": map[string]any{
 					"items": []map[string]any{{"product_id": 1, "offer_id": "BAD-1"}},
 					"total": 1,
 				},
 			})
-		case "/v2/product/info/list":
+		case "/v3/product/info/list":
 			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-				"result": []map[string]any{
+				"items": []map[string]any{
 					{"product_id": 1, "offer_id": "BAD-1", "name": "X", "price": "not-a-number"},
 				},
 			})
@@ -231,7 +245,7 @@ func TestOzon_ListSKUs_Pagination(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/v2/product/list":
+		case "/v3/product/list":
 			listCallCount++
 			var reqBody map[string]any
 			json.NewDecoder(r.Body).Decode(&reqBody) //nolint:errcheck
@@ -260,19 +274,19 @@ func TestOzon_ListSKUs_Pagination(t *testing.T) {
 				})
 			}
 
-		case "/v2/product/info/list":
-			// Возвращаем детали для всех переданных ID
+		case "/v3/product/info/list":
+			// Возвращаем детали для всех переданных ID (v3: items на корневом уровне)
 			var body map[string]any
 			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 			ids, _ := body["product_id"].([]any)
-			result := make([]map[string]any, len(ids))
+			items := make([]map[string]any, len(ids))
 			for i, id := range ids {
-				result[i] = map[string]any{
+				items[i] = map[string]any{
 					"product_id": id, "offer_id": fmt.Sprintf("SKU-%v", id),
 					"name": "Товар", "price": "100.00",
 				}
 			}
-			json.NewEncoder(w).Encode(map[string]any{"result": result}) //nolint:errcheck
+			json.NewEncoder(w).Encode(map[string]any{"items": items}) //nolint:errcheck
 		}
 	}))
 	defer ts.Close()
@@ -302,7 +316,13 @@ func TestOzon_UpdatePrices_Success(t *testing.T) {
 		}
 		checkOzonAuth(t, r)
 		json.NewDecoder(r.Body).Decode(&captured) //nolint:errcheck
-		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"result": []map[string]any{
+				{"offer_id": "OFFER-1", "updated": true, "errors": []any{}},
+				{"offer_id": "OFFER-2", "updated": true, "errors": []any{}},
+			},
+		})
 	}))
 	defer ts.Close()
 
@@ -329,6 +349,35 @@ func TestOzon_UpdatePrices_Success(t *testing.T) {
 	}
 	if first["vat"] != "0" {
 		t.Errorf("vat: %v, ожидали \"0\"", first["vat"])
+	}
+}
+
+func TestOzon_UpdatePrices_PartialFailure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+			"result": []map[string]any{
+				{"offer_id": "OK-1", "updated": true, "errors": []any{}},
+				{"offer_id": "FAIL-2", "updated": false, "errors": []map[string]any{
+					{"code": "not_found", "message": "Product not found"},
+				}},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	err := newTestClient(ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
+		{ExternalSKU: "OK-1", NewPrice: 100},
+		{ExternalSKU: "FAIL-2", NewPrice: 200},
+	})
+	if err == nil {
+		t.Fatal("ожидали ошибку при частичном сбое, получили nil")
+	}
+	if !strings.Contains(err.Error(), "FAIL-2") {
+		t.Errorf("ошибка должна упоминать offer_id: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Product not found") {
+		t.Errorf("ошибка должна упоминать сообщение Ozon: %v", err)
 	}
 }
 

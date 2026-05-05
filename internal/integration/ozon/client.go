@@ -63,6 +63,9 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
+		} else if resp.StatusCode == http.StatusTooManyRequests {
+			_ = resp.Body.Close()
+			return nil, integration.ErrRateLimited
 		} else if resp.StatusCode >= 500 {
 			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("ozon: server error %d", resp.StatusCode)
@@ -80,12 +83,12 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 	return nil, lastErr
 }
 
-// TestAuth проверяет валидность ключей запросом к /v1/product/list с limit=1.
+// TestAuth проверяет валидность ключей запросом к /v1/seller/info.
 func (c *Client) TestAuth(ctx context.Context) error {
 	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			baseURL+"/v1/product/list",
-			strings.NewReader(`{"filter":{},"last_id":"","limit":1}`))
+			baseURL+"/v1/seller/info",
+			strings.NewReader(`{}`))
 		if err != nil {
 			return nil, fmt.Errorf("ozon: build request: %w", err)
 		}
@@ -102,12 +105,12 @@ func (c *Client) TestAuth(ctx context.Context) error {
 		return integration.ErrUnauthorized
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ozon: unexpected status %d", resp.StatusCode)
+		return fmt.Errorf("ozon: seller/info status %d", resp.StatusCode)
 	}
 	return nil
 }
 
-// ListSKUs возвращает товары через /v2/product/list.
+// ListSKUs возвращает товары через /v3/product/list + /v3/product/info/list.
 func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 	type productItem struct {
 		ProductID int64  `json:"product_id"`
@@ -127,7 +130,7 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		Name      string `json:"name"`
 	}
 	type infoResponse struct {
-		Result []priceInfo `json:"result"`
+		Items []priceInfo `json:"items"`
 	}
 
 	var (
@@ -141,7 +144,7 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 			reqBody := fmt.Sprintf(`{"filter":{},"last_id":%q,"limit":100}`, currentLastID)
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-				baseURL+"/v2/product/list",
+				baseURL+"/v3/product/list",
 				strings.NewReader(reqBody))
 			if err != nil {
 				return nil, fmt.Errorf("ozon: build list request: %w", err)
@@ -192,7 +195,7 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		payloadStr := string(payloadBytes)
 		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-				baseURL+"/v2/product/info/list",
+				baseURL+"/v3/product/info/list",
 				strings.NewReader(payloadStr))
 			if err != nil {
 				return nil, fmt.Errorf("ozon: build info request: %w", err)
@@ -210,7 +213,7 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		}
 		_ = resp.Body.Close()
 
-		for _, p := range infoResp.Result {
+		for _, p := range infoResp.Items {
 			price := 0.0
 			if _, err := fmt.Sscanf(p.Price, "%f", &price); err != nil {
 				return nil, fmt.Errorf("ozon: parse price %q for sku %s: %w", p.Price, p.OfferID, err)
@@ -266,10 +269,41 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 		return fmt.Errorf("ozon: update request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
-	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("ozon: update status %d", resp.StatusCode)
+	}
+
+	type updateResultItem struct {
+		OfferID string `json:"offer_id"`
+		Updated bool   `json:"updated"`
+		Errors  []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	type updateResponse struct {
+		Result []updateResultItem `json:"result"`
+	}
+
+	var res updateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return fmt.Errorf("ozon: decode update response: %w", err)
+	}
+
+	var failed []string
+	for _, item := range res.Result {
+		if !item.Updated {
+			msg := item.OfferID
+			if len(item.Errors) > 0 {
+				msg += ": " + item.Errors[0].Message
+			}
+			failed = append(failed, msg)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("ozon: %d price(s) not updated: %s", len(failed), strings.Join(failed, "; "))
 	}
 	return nil
 }
