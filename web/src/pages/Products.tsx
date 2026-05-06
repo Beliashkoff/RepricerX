@@ -30,6 +30,8 @@ import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X 
 
 const terminalStatuses: ImportStatus['status'][] = ['succeeded', 'partial', 'failed', 'canceled']
 const activeImportStatuses: ImportStatus['status'][] = ['pending', 'running']
+const allShopsValue = '__all_shops__'
+const allStatusesValue = '__all_statuses__'
 
 // ─── sub-components ──────────────────────────────────────────────────────────
 
@@ -452,23 +454,23 @@ export default function Products() {
           </div>
 
           {/* shop filter */}
-          <Select value={shopFilter} onValueChange={v => { setShopFilter(v); setPage(1); setSelectedIds(new Set()) }}>
+          <Select value={shopFilter || allShopsValue} onValueChange={v => { setShopFilter(v === allShopsValue ? '' : v); setPage(1); setSelectedIds(new Set()) }}>
             <SelectTrigger className="w-40">
               <SelectValue placeholder="Все магазины" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Все магазины</SelectItem>
+              <SelectItem value={allShopsValue}>Все магазины</SelectItem>
               {shops.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
             </SelectContent>
           </Select>
 
           {/* status filter */}
-          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setPage(1); setSelectedIds(new Set()) }}>
+          <Select value={statusFilter || allStatusesValue} onValueChange={v => { setStatusFilter(v === allStatusesValue ? '' : v); setPage(1); setSelectedIds(new Set()) }}>
             <SelectTrigger className="w-36">
               <SelectValue placeholder="Все статусы" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Все статусы</SelectItem>
+              <SelectItem value={allStatusesValue}>Все статусы</SelectItem>
               <SelectItem value="active">Активен</SelectItem>
               <SelectItem value="archived">Архив</SelectItem>
               <SelectItem value="out_of_stock">Нет в наличии</SelectItem>
