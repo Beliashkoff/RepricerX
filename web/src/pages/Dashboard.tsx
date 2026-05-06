@@ -5,18 +5,19 @@ import { auditApi } from '@/api/audit'
 import { formatPrice, formatDate } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { TrendingDown, TrendingUp } from 'lucide-react'
+import type { ShopStatus } from '@/types/api'
 
-function ShopStatusBadge({ status }: { status: string }) {
-  const map: Record<string, 'success' | 'destructive' | 'warning' | 'secondary'> = {
+function ShopStatusBadge({ status }: { status: ShopStatus }) {
+  const map: Record<ShopStatus, 'success' | 'destructive' | 'warning' | 'secondary'> = {
+    draft: 'warning',
     active: 'success',
     error: 'destructive',
-    pending: 'warning',
     disabled: 'secondary',
   }
-  const labels: Record<string, string> = {
-    active: 'Активен', error: 'Ошибка', pending: 'Проверка', disabled: 'Отключён',
+  const labels: Record<ShopStatus, string> = {
+    draft: 'Черновик', active: 'Активен', error: 'Ошибка', disabled: 'Отключён',
   }
-  return <Badge variant={map[status] ?? 'secondary'}>{labels[status] ?? status}</Badge>
+  return <Badge variant={map[status]}>{labels[status]}</Badge>
 }
 
 export default function Dashboard() {

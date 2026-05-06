@@ -1,7 +1,7 @@
 // Типы, соответствующие swagger.yaml бэкенда
 
 export type Marketplace = 'wb' | 'ozon'
-export type ShopStatus = 'active' | 'error' | 'pending' | 'disabled'
+export type ShopStatus = 'draft' | 'active' | 'error' | 'disabled'
 export type ProductStatus = 'active' | 'archived' | 'out_of_stock'
 export type ImportStatusValue = 'pending' | 'running' | 'succeeded' | 'partial' | 'failed' | 'canceled'
 export type JobStatusValue = 'pending' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'retrying'

@@ -15,9 +15,9 @@ import { formatDate } from '@/lib/utils'
 
 function ShopStatusBadge({ status }: { status: Shop['status'] }) {
   const config = {
+    draft: { label: 'Черновик', variant: 'warning' as const },
     active: { label: 'Активен', variant: 'success' as const },
     error: { label: 'Ошибка', variant: 'destructive' as const },
-    pending: { label: 'Проверка', variant: 'warning' as const },
     disabled: { label: 'Отключён', variant: 'secondary' as const },
   }
   const c = config[status] ?? { label: status, variant: 'secondary' as const }
