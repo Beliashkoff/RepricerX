@@ -349,6 +349,16 @@ func TestImportErrorsDrillDown(t *testing.T) {
 		t.Fatalf("items length %d != total %d", len(errBody.Items), errBody.Total)
 	}
 
+	largePageResp := doJSON(t, client, http.MethodGet, "/api/imports/"+importID+"/errors?page=1&perPage=999", nil)
+	mustStatus(t, largePageResp, http.StatusOK)
+	var largePageBody struct {
+		PerPage int `json:"perPage"`
+	}
+	mustDecode(t, largePageResp, &largePageBody)
+	if largePageBody.PerPage != 100 {
+		t.Fatalf("want perPage clamped to 100, got %d", largePageBody.PerPage)
+	}
+
 	// чужой пользователь не видит ошибки
 	other := loginAsNewUser(t, "import_errors_other")
 	wrongResp := doJSON(t, other, http.MethodGet, "/api/imports/"+importID+"/errors", nil)

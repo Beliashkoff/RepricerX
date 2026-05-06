@@ -16,6 +16,11 @@ type ProductHandler struct {
 	svc *productsvc.Service
 }
 
+const (
+	defaultImportErrorsPerPage = 20
+	maxImportErrorsPerPage     = 100
+)
+
 func NewProductHandler(svc *productsvc.Service) *ProductHandler {
 	return &ProductHandler{svc: svc}
 }
@@ -376,12 +381,7 @@ func (h *ProductHandler) GetImportErrors(c *gin.Context) {
 	}
 	page := parsePositiveInt(c.Query("page"))
 	perPage := parsePositiveInt(firstQuery(c, "per_page", "perPage"))
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 20
-	}
+	page, perPage = normalizeImportErrorsPagination(page, perPage)
 	errs, total, err := h.svc.GetImportErrors(c.Request.Context(), user.ID, importID, page, perPage)
 	if err != nil {
 		handleProductErr(c, err)
@@ -392,6 +392,19 @@ func (h *ProductHandler) GetImportErrors(c *gin.Context) {
 		items = append(items, importErrorDTO{ExternalSKU: e.ExternalSKU, Code: e.Code, Message: e.Message})
 	}
 	c.JSON(http.StatusOK, importErrorsResponse{Items: items, Total: total, Page: page, PerPage: perPage})
+}
+
+func normalizeImportErrorsPagination(page, perPage int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = defaultImportErrorsPerPage
+	}
+	if perPage > maxImportErrorsPerPage {
+		perPage = maxImportErrorsPerPage
+	}
+	return page, perPage
 }
 
 func parseProductListFilter(c *gin.Context) (productsvc.ListFilter, bool) {
