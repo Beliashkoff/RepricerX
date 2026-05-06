@@ -261,7 +261,11 @@ func (s *Service) ExecuteImportJob(ctx context.Context, job *domain.BackgroundJo
 
 	credsJSON, err := crypto.Decrypt(shop.CredentialsEncrypted, s.secret)
 	if err != nil {
-		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorCredentials, "cannot decrypt credentials", false)
+		msg := "cannot decrypt credentials"
+		if errors.Is(err, crypto.ErrDecrypt) {
+			msg = "credentials not encrypted — run cmd/credbackfill"
+		}
+		return s.finishImportFailure(ctx, payload.ImportID, job, 0, importErrorCredentials, msg, false)
 	}
 	client, err := factory(payload.ShopID.String(), credsJSON)
 	if err != nil {

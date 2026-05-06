@@ -26,8 +26,7 @@ func (r *productsPg) Create(ctx context.Context, userID uuid.UUID, input Product
 		FROM shops
 		WHERE id=$2 AND user_id=$1
 		RETURNING id, shop_id, external_sku, name, current_price::float8, currency, status,
-		          min_price::float8, max_price::float8, co
-				  st_price::float8,
+		          min_price::float8, max_price::float8, cost_price::float8,
 		          stock_count, rating::float8, reviews_count, last_synced_at,
 		          false, created_at, updated_at`,
 		userID, input.ShopID, input.ExternalSKU, input.Name, input.CurrentPrice, input.Currency,

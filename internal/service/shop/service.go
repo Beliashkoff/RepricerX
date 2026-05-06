@@ -164,6 +164,9 @@ func (s *Service) TestConnection(ctx context.Context, userID, shopID uuid.UUID) 
 
 	credsJSON, err := crypto.Decrypt(shop.CredentialsEncrypted, s.secret)
 	if err != nil {
+		if errors.Is(err, crypto.ErrDecrypt) {
+			return fmt.Errorf("shop %s: credentials not encrypted — run cmd/credbackfill: %w", shop.ID, err)
+		}
 		return fmt.Errorf("shop test: decrypt: %w", err)
 	}
 

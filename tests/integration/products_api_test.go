@@ -57,6 +57,10 @@ func TestProductCreateAndDuplicateSKU(t *testing.T) {
 	if product["externalSku"] != "SKU-1" {
 		t.Fatalf("want SKU-1, got %v", product["externalSku"])
 	}
+	// createTestProduct sends costPrice=70 — verify the RETURNING clause echoes it correctly.
+	if cp, ok := product["costPrice"].(float64); !ok || cp != 70 {
+		t.Fatalf("want costPrice=70, got %v", product["costPrice"])
+	}
 
 	dup := doJSON(t, client, http.MethodPost, "/api/shops/"+shopID+"/products", map[string]any{
 		"externalSku":  "SKU-1",
@@ -65,6 +69,41 @@ func TestProductCreateAndDuplicateSKU(t *testing.T) {
 	}, withOrigin())
 	mustStatus(t, dup, http.StatusConflict)
 	mustErrorCode(t, dup, "duplicate_sku")
+}
+
+func TestProductCreate_CostPrice(t *testing.T) {
+	truncate(t)
+	client := loginAsNewUser(t, "product_costprice")
+	shopID := createTestShop(t, client, "product_costprice")
+
+	// with explicit costPrice
+	resp := doJSON(t, client, http.MethodPost, "/api/shops/"+shopID+"/products", map[string]any{
+		"externalSku":  "COST-001",
+		"name":         "Cost Test",
+		"currentPrice": 200,
+		"currency":     "RUB",
+		"costPrice":    55.5,
+	}, withOrigin())
+	mustStatus(t, resp, http.StatusCreated)
+	var body map[string]any
+	mustDecode(t, resp, &body)
+	if cp, ok := body["costPrice"].(float64); !ok || cp != 55.5 {
+		t.Fatalf("want costPrice=55.5, got %v", body["costPrice"])
+	}
+
+	// without costPrice — must be null / absent, not a SQL error
+	resp2 := doJSON(t, client, http.MethodPost, "/api/shops/"+shopID+"/products", map[string]any{
+		"externalSku":  "COST-002",
+		"name":         "No Cost",
+		"currentPrice": 100,
+		"currency":     "RUB",
+	}, withOrigin())
+	mustStatus(t, resp2, http.StatusCreated)
+	var body2 map[string]any
+	mustDecode(t, resp2, &body2)
+	if body2["costPrice"] != nil {
+		t.Fatalf("want costPrice=null when omitted, got %v", body2["costPrice"])
+	}
 }
 
 func TestProductSameSKUAcrossShopsAndWrongOwner(t *testing.T) {

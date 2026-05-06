@@ -7,6 +7,9 @@
 *.dll
 *.so
 *.dylib
+/api
+/worker
+/credbackfill
 
 # Test binary, built with `go test -c`
 *.test
@@ -35,6 +38,7 @@ docker/certs/*.key
 docker/certs/*.pem
 *.key
 *.crt
+
 
 # бинарники сборки
 /api

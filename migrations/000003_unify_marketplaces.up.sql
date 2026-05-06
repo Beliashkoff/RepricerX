@@ -228,7 +228,8 @@ SELECT
     user_id,
     'wb',
     COALESCE(NULLIF(name, ''), 'Wildberries shop'),
-    convert_to(COALESCE(api_token_wb, ''), 'UTF8'),
+    -- NOTE: хранится plaintext-JSON; до использования магазина обязательно запустить cmd/credbackfill.
+    convert_to(jsonb_build_object('api_key', COALESCE(api_token_wb, ''))::text, 'UTF8'),
     'draft',
     COALESCE(created_at, NOW()),
     NOW()
@@ -331,10 +332,5 @@ SELECT
 FROM competitors_ozon
 ON CONFLICT (id) DO NOTHING;
 
-DROP TABLE IF EXISTS competitors_ozon;
-DROP TABLE IF EXISTS products_ozon;
-DROP TABLE IF EXISTS shops_ozon;
-DROP TABLE IF EXISTS competitors_wb;
-DROP TABLE IF EXISTS products_wb;
-DROP TABLE IF EXISTS shops_wb;
-DROP TABLE IF EXISTS payments;
+-- Legacy tables intentionally NOT dropped here.
+-- Run cmd/credbackfill to re-encrypt plaintext credentials, then apply migration 000008.
