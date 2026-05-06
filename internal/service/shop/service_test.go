@@ -3,6 +3,7 @@ package shop_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -73,9 +74,15 @@ func (r *fakeShopsRepo) UpdateStatus(_ context.Context, id uuid.UUID, status str
 	return nil
 }
 
-type fakeIntLogRepo struct{}
+type fakeIntLogRepo struct {
+	entries []*domain.IntegrationLogEntry
+}
 
-func (r *fakeIntLogRepo) Create(_ context.Context, _ *domain.IntegrationLogEntry) error { return nil }
+func (r *fakeIntLogRepo) Create(_ context.Context, e *domain.IntegrationLogEntry) error {
+	cp := *e
+	r.entries = append(r.entries, &cp)
+	return nil
+}
 func (r *fakeIntLogRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
@@ -91,6 +98,10 @@ func (f *fakeMarketplace) UpdatePrices(_ context.Context, _ []integration.PriceU
 const testSecret = "test-secret-for-unit-tests"
 
 func newSvc(repo *fakeShopsRepo, testAuthErr error) *shopsvc.Service {
+	return newSvcWithLog(repo, testAuthErr, &fakeIntLogRepo{})
+}
+
+func newSvcWithLog(repo *fakeShopsRepo, testAuthErr error, intLog repository.IntegrationLogRepository) *shopsvc.Service {
 	factory := func(authErr error) shopsvc.MarketplaceFactory {
 		return func(_ string, _ []byte) (integration.Marketplace, error) {
 			return &fakeMarketplace{authErr: authErr}, nil
@@ -98,7 +109,7 @@ func newSvc(repo *fakeShopsRepo, testAuthErr error) *shopsvc.Service {
 	}
 	return shopsvc.New(
 		repo,
-		&fakeIntLogRepo{},
+		intLog,
 		testSecret,
 		map[string]shopsvc.MarketplaceFactory{
 			"wb":   factory(testAuthErr),
@@ -379,7 +390,9 @@ func TestTestConnection_Success(t *testing.T) {
 
 func TestTestConnection_AuthFailed(t *testing.T) {
 	repo := newFakeShopsRepo()
-	svc := newSvc(repo, integration.ErrUnauthorized)
+	intLog := &fakeIntLogRepo{}
+	rawErr := fmt.Errorf("adapter denied api_key=secret-token: %w", integration.ErrUnauthorized)
+	svc := newSvcWithLog(repo, rawErr, intLog)
 	userID := uuid.New()
 
 	shop, _ := svc.Create(context.Background(), userID, "wb", "Shop", json.RawMessage(`{"api_key":"bad"}`))
@@ -391,5 +404,51 @@ func TestTestConnection_AuthFailed(t *testing.T) {
 	got, _ := svc.Get(context.Background(), userID, shop.ID)
 	if got.Status != domain.ShopStatusError {
 		t.Fatalf("want status error, got %q", got.Status)
+	}
+	if len(intLog.entries) != 1 {
+		t.Fatalf("want 1 integration log entry, got %d", len(intLog.entries))
+	}
+	if intLog.entries[0].ErrorText != "auth_failed" {
+		t.Fatalf("integration log must use sanitized error code, got %q", intLog.entries[0].ErrorText)
+	}
+}
+
+func TestTestConnection_RateLimitedSanitizesIntegrationLog(t *testing.T) {
+	repo := newFakeShopsRepo()
+	intLog := &fakeIntLogRepo{}
+	rawErr := fmt.Errorf("adapter response included account_id=123: %w", integration.ErrRateLimited)
+	svc := newSvcWithLog(repo, rawErr, intLog)
+	userID := uuid.New()
+
+	shop, _ := svc.Create(context.Background(), userID, "wb", "Shop", json.RawMessage(`{"api_key":"valid"}`))
+	err := svc.TestConnection(context.Background(), userID, shop.ID)
+	if err != shopsvc.ErrRateLimited {
+		t.Fatalf("want ErrRateLimited, got %v", err)
+	}
+	if len(intLog.entries) != 1 {
+		t.Fatalf("want 1 integration log entry, got %d", len(intLog.entries))
+	}
+	if intLog.entries[0].ErrorText != "marketplace_rate_limited" {
+		t.Fatalf("integration log must use sanitized rate-limit code, got %q", intLog.entries[0].ErrorText)
+	}
+}
+
+func TestTestConnection_UnknownAdapterErrorSanitizesIntegrationLog(t *testing.T) {
+	repo := newFakeShopsRepo()
+	intLog := &fakeIntLogRepo{}
+	rawErr := fmt.Errorf("upstream failed with token=secret-token")
+	svc := newSvcWithLog(repo, rawErr, intLog)
+	userID := uuid.New()
+
+	shop, _ := svc.Create(context.Background(), userID, "wb", "Shop", json.RawMessage(`{"api_key":"valid"}`))
+	err := svc.TestConnection(context.Background(), userID, shop.ID)
+	if err == nil {
+		t.Fatal("want raw adapter error returned for internal handling, got nil")
+	}
+	if len(intLog.entries) != 1 {
+		t.Fatalf("want 1 integration log entry, got %d", len(intLog.entries))
+	}
+	if intLog.entries[0].ErrorText != "marketplace_test_failed" {
+		t.Fatalf("integration log must use sanitized generic code, got %q", intLog.entries[0].ErrorText)
 	}
 }

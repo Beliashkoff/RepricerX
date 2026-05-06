@@ -247,12 +247,14 @@ func (s *Service) TestConnection(ctx context.Context, userID, shopID uuid.UUID) 
 
 	if testErr != nil {
 		newStatus = domain.ShopStatusError
-		errText := testErr.Error()
-		logEntry.ErrorText = errText
 		if errors.Is(testErr, integration.ErrUnauthorized) {
+			logEntry.ErrorText = "auth_failed"
 			testErr = ErrAuthFailed
 		} else if errors.Is(testErr, integration.ErrRateLimited) {
+			logEntry.ErrorText = "marketplace_rate_limited"
 			testErr = ErrRateLimited
+		} else {
+			logEntry.ErrorText = "marketplace_test_failed"
 		}
 	}
 
