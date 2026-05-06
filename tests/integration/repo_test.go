@@ -12,6 +12,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/token"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // --- UsersRepository ---
@@ -318,6 +319,101 @@ func TestProductsRepoBulkPatchRollbackOnConstraint(t *testing.T) {
 	}
 }
 
+func TestStrategyAssignmentsTenantEnforced(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	owner := createTenantFixture(t, "strategy-owner")
+	other := createTenantFixture(t, "strategy-other")
+	strategyID := createStrategy(t, owner.UserID)
+
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO strategy_assignments (strategy_id, product_id)
+		VALUES ($1, $2)`,
+		strategyID, other.ProductID,
+	)
+	requireConstraintError(t, err, "strategy_assignments_tenant_check")
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO strategy_assignments (strategy_id, product_id)
+		VALUES ($1, $2)`,
+		strategyID, owner.ProductID,
+	)
+	if err != nil {
+		t.Fatalf("insert same-tenant strategy assignment: %v", err)
+	}
+}
+
+func TestPricePlanItemsTenantEnforced(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	owner := createTenantFixture(t, "price-plan-owner")
+	other := createTenantFixture(t, "price-plan-other")
+	planID := createPricePlan(t, owner.ShopID)
+	strategyID := createStrategy(t, owner.UserID)
+	otherStrategyID := createStrategy(t, other.UserID)
+
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO price_plan_items
+			(plan_id, product_id, strategy_id, current_price, target_price, final_price)
+		VALUES ($1, $2, $3, 100, 90, 90)`,
+		planID, other.ProductID, strategyID,
+	)
+	requireConstraintError(t, err, "price_plan_items_product_tenant_check")
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO price_plan_items
+			(plan_id, product_id, strategy_id, current_price, target_price, final_price)
+		VALUES ($1, $2, $3, 100, 90, 90)`,
+		planID, owner.ProductID, otherStrategyID,
+	)
+	requireConstraintError(t, err, "price_plan_items_strategy_tenant_check")
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO price_plan_items
+			(plan_id, product_id, strategy_id, current_price, target_price, final_price)
+		VALUES ($1, $2, $3, 100, 90, 90)`,
+		planID, owner.ProductID, strategyID,
+	)
+	if err != nil {
+		t.Fatalf("insert same-tenant price plan item: %v", err)
+	}
+}
+
+func TestPriceChangeLogTenantEnforced(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	owner := createTenantFixture(t, "price-log-owner")
+	other := createTenantFixture(t, "price-log-other")
+	strategyID := createStrategy(t, owner.UserID)
+	otherStrategyID := createStrategy(t, other.UserID)
+
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO price_change_log
+			(shop_id, product_id, strategy_id, old_price, new_price, target_price, status, correlation_id)
+		VALUES ($1, $2, $3, 100, 90, 90, 'applied', $4)`,
+		owner.ShopID, other.ProductID, strategyID, uuid.New(),
+	)
+	requireConstraintError(t, err, "price_change_log_product_tenant_check")
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO price_change_log
+			(shop_id, product_id, strategy_id, old_price, new_price, target_price, status, correlation_id)
+		VALUES ($1, $2, $3, 100, 90, 90, 'applied', $4)`,
+		owner.ShopID, owner.ProductID, otherStrategyID, uuid.New(),
+	)
+	requireConstraintError(t, err, "price_change_log_strategy_tenant_check")
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO price_change_log
+			(shop_id, product_id, strategy_id, old_price, new_price, target_price, status, correlation_id)
+		VALUES ($1, $2, $3, 100, 90, 90, 'applied', $4)`,
+		owner.ShopID, owner.ProductID, strategyID, uuid.New(),
+	)
+	if err != nil {
+		t.Fatalf("insert same-tenant price change log: %v", err)
+	}
+}
+
 func TestSessionsRepo_DeleteByTokenHash(t *testing.T) {
 	truncate(t)
 	usersRepo := repository.NewUsersRepository(testPool)
@@ -418,6 +514,93 @@ func TestSessionsRepo_TouchIdleNotNeeded(t *testing.T) {
 	}
 	if newIdle != nil {
 		t.Fatal("expected no extension (session > 12h from expiry), got non-nil")
+	}
+}
+
+type tenantFixture struct {
+	UserID    uuid.UUID
+	ShopID    uuid.UUID
+	ProductID uuid.UUID
+}
+
+func createTenantFixture(t *testing.T, label string) tenantFixture {
+	t.Helper()
+	ctx := context.Background()
+	userID := uuid.New()
+	shopID := uuid.New()
+	productID := uuid.New()
+
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO users (id, email, password_hash, display_name, status)
+		VALUES ($1, $2, 'h', $3, 'active')`,
+		userID, label+"-"+uuid.NewString()+"@example.com", label,
+	)
+	if err != nil {
+		t.Fatalf("create tenant user: %v", err)
+	}
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO shops (id, user_id, marketplace, name, credentials_encrypted, status)
+		VALUES ($1, $2, 'wb', $3, '{}'::bytea, 'active')`,
+		shopID, userID, label+" shop",
+	)
+	if err != nil {
+		t.Fatalf("create tenant shop: %v", err)
+	}
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO products (id, shop_id, external_sku, name, current_price, status)
+		VALUES ($1, $2, $3, $4, 100, 'active')`,
+		productID, shopID, "SKU-"+uuid.NewString(), label+" product",
+	)
+	if err != nil {
+		t.Fatalf("create tenant product: %v", err)
+	}
+
+	return tenantFixture{UserID: userID, ShopID: shopID, ProductID: productID}
+}
+
+func createStrategy(t *testing.T, userID uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO strategies (id, user_id, name, type, params, constraints)
+		VALUES ($1, $2, $3, 'fixed', '{}'::jsonb, '{}'::jsonb)`,
+		id, userID, "strategy "+id.String(),
+	)
+	if err != nil {
+		t.Fatalf("create strategy: %v", err)
+	}
+	return id
+}
+
+func createPricePlan(t *testing.T, shopID uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO price_plans (id, shop_id, status)
+		VALUES ($1, $2, 'pending')`,
+		id, shopID,
+	)
+	if err != nil {
+		t.Fatalf("create price plan: %v", err)
+	}
+	return id
+}
+
+func requireConstraintError(t *testing.T, err error, constraint string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("want constraint error %q, got nil", constraint)
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("want pg error %q, got %T: %v", constraint, err, err)
+	}
+	if pgErr.Code != "23514" || pgErr.ConstraintName != constraint {
+		t.Fatalf("want check violation %q, got code=%s constraint=%q: %v",
+			constraint, pgErr.Code, pgErr.ConstraintName, err)
 	}
 }
 
