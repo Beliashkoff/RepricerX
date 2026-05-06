@@ -53,6 +53,10 @@ type EmailVerificationsRepository interface {
 	// GetUnusedValid ищет токен: token_hash=$1 AND expires_at > now() AND used_at IS NULL.
 	GetUnusedValid(ctx context.Context, tokenHash string) (id uuid.UUID, userID uuid.UUID, err error)
 	MarkUsed(ctx context.Context, id uuid.UUID) error
+	// ConsumeAndActivate атомарно помечает токен использованным и переводит пользователя в 'active'
+	// только если его текущий статус 'pending_verification'. Возвращает ErrNotFound если токен
+	// невалиден/истёк/уже использован или пользователь не в статусе pending_verification.
+	ConsumeAndActivate(ctx context.Context, tokenHash string) (userID uuid.UUID, err error)
 	// InvalidatePending помечает used_at=now() для всех неиспользованных токенов юзера (при resend).
 	InvalidatePending(ctx context.Context, userID uuid.UUID) error
 	DeleteExpired(ctx context.Context) (int64, error)

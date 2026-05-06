@@ -153,24 +153,14 @@ type VerifyEmailResult struct {
 }
 
 // VerifyEmail активирует аккаунт по plaintext-токену из письма.
+// Атомарная операция: токен помечается использованным и пользователь активируется
+// в одной CTE-инструкции с условием WHERE status='pending_verification'.
 func (s *Service) VerifyEmail(ctx context.Context, plaintextToken string) *VerifyEmailResult {
 	tokenHash := token.Hash(plaintextToken)
-
-	id, userID, err := s.verifications.GetUnusedValid(ctx, tokenHash)
+	userID, err := s.verifications.ConsumeAndActivate(ctx, tokenHash)
 	if err != nil {
 		return &VerifyEmailResult{Success: false}
 	}
-
-	// Транзакционно помечаем токен использованным и активируем пользователя.
-	// pgxpool не даёт транзакций через интерфейс — делаем две операции последовательно;
-	// anti-replay обеспечивается условием AND status='pending_verification' в UpdateStatus.
-	if err = s.verifications.MarkUsed(ctx, id); err != nil {
-		return &VerifyEmailResult{Success: false}
-	}
-	if err = s.users.UpdateStatus(ctx, userID, domain.UserStatusActive); err != nil {
-		return &VerifyEmailResult{Success: false}
-	}
-
 	s.audit.EmailVerificationUsed(userID)
 	return &VerifyEmailResult{Success: true}
 }

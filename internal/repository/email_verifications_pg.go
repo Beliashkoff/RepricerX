@@ -47,6 +47,32 @@ func (r *emailVerificationsPg) MarkUsed(ctx context.Context, id uuid.UUID) error
 	return err
 }
 
+// ConsumeAndActivate атомарно (в одной CTE-инструкции) помечает токен использованным
+// и переводит пользователя в 'active', если его статус 'pending_verification'.
+// Если токен уже использован или пользователь не pending — возвращает ErrNotFound.
+func (r *emailVerificationsPg) ConsumeAndActivate(ctx context.Context, tokenHash string) (uuid.UUID, error) {
+	var userID uuid.UUID
+	err := r.db.QueryRow(ctx, `
+		WITH consumed AS (
+			UPDATE email_verifications
+			SET used_at = now()
+			WHERE token_hash = $1
+			  AND expires_at > now()
+			  AND used_at IS NULL
+			RETURNING user_id
+		)
+		UPDATE users
+		SET status = 'active'
+		WHERE id = (SELECT user_id FROM consumed)
+		  AND status = 'pending_verification'
+		RETURNING id
+	`, tokenHash).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	return userID, err
+}
+
 // InvalidatePending помечает все незакрытые токены юзера как использованные перед resend.
 func (r *emailVerificationsPg) InvalidatePending(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.Exec(ctx, `

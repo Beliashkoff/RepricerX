@@ -507,6 +507,64 @@ func TestPasswordResetTokensRepo_IssueInvalidatesOlderPending(t *testing.T) {
 	}
 }
 
+// TestEmailVerificationsRepo_ConsumeAndActivate проверяет атомарность и защитные условия.
+func TestEmailVerificationsRepo_ConsumeAndActivate(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	usersRepo := repository.NewUsersRepository(testPool)
+	verRepo := repository.NewEmailVerificationsRepository(testPool)
+
+	// pending пользователь + валидный токен → активируется, токен становится использованным.
+	pendingUser := &domain.User{
+		ID: uuid.New(), Email: "consume-activate@example.com",
+		PasswordHash: "h", DisplayName: "CA", Status: domain.UserStatusPending,
+	}
+	if err := usersRepo.Create(ctx, pendingUser); err != nil {
+		t.Fatalf("Create pending user: %v", err)
+	}
+	_, hashHex, _ := token.Generate()
+	if err := verRepo.Create(ctx, pendingUser.ID, hashHex, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Create token: %v", err)
+	}
+
+	userID, err := verRepo.ConsumeAndActivate(ctx, hashHex)
+	if err != nil {
+		t.Fatalf("ConsumeAndActivate (pending): %v", err)
+	}
+	if userID != pendingUser.ID {
+		t.Fatalf("want userID %v, got %v", pendingUser.ID, userID)
+	}
+	got, _ := usersRepo.GetByID(ctx, pendingUser.ID)
+	if got.Status != domain.UserStatusActive {
+		t.Fatalf("want status active after consume, got %q", got.Status)
+	}
+
+	// повторный вызов с тем же токеном → ErrNotFound (токен уже использован).
+	if _, err = verRepo.ConsumeAndActivate(ctx, hashHex); err != repository.ErrNotFound {
+		t.Fatalf("want ErrNotFound on token reuse, got %v", err)
+	}
+
+	// заблокированный пользователь + валидный токен → ErrNotFound, статус не меняется.
+	blockedUser := &domain.User{
+		ID: uuid.New(), Email: "blocked-consume@example.com",
+		PasswordHash: "h", DisplayName: "BC", Status: domain.UserStatusBlocked,
+	}
+	if err := usersRepo.Create(ctx, blockedUser); err != nil {
+		t.Fatalf("Create blocked user: %v", err)
+	}
+	_, blockedHash, _ := token.Generate()
+	if err := verRepo.Create(ctx, blockedUser.ID, blockedHash, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("Create blocked token: %v", err)
+	}
+	if _, err = verRepo.ConsumeAndActivate(ctx, blockedHash); err != repository.ErrNotFound {
+		t.Fatalf("want ErrNotFound for blocked user, got %v", err)
+	}
+	gotBlocked, _ := usersRepo.GetByID(ctx, blockedUser.ID)
+	if gotBlocked.Status != domain.UserStatusBlocked {
+		t.Fatalf("blocked user status must not change, got %q", gotBlocked.Status)
+	}
+}
+
 func TestPasswordResetTokensRepo_RejectsExpiredAndBlockedUser(t *testing.T) {
 	truncate(t)
 	usersRepo := repository.NewUsersRepository(testPool)

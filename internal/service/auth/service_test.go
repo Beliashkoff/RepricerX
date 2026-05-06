@@ -260,10 +260,15 @@ type verToken struct {
 type fakeVerificationsRepo struct {
 	mu     sync.Mutex
 	tokens map[string]*verToken
+	users  *fakeUsersRepo // optional; used by ConsumeAndActivate to enforce pending_verification guard
 }
 
-func newFakeVerifications() *fakeVerificationsRepo {
-	return &fakeVerificationsRepo{tokens: make(map[string]*verToken)}
+func newFakeVerifications(users ...*fakeUsersRepo) *fakeVerificationsRepo {
+	r := &fakeVerificationsRepo{tokens: make(map[string]*verToken)}
+	if len(users) > 0 {
+		r.users = users[0]
+	}
+	return r
 }
 
 func (r *fakeVerificationsRepo) addToken(userID uuid.UUID, tokenHash string) {
@@ -300,6 +305,33 @@ func (r *fakeVerificationsRepo) MarkUsed(_ context.Context, id uuid.UUID) error 
 		}
 	}
 	return repository.ErrNotFound
+}
+
+// ConsumeAndActivate атомарно (в памяти) помечает токен использованным и переводит
+// пользователя в 'active' только если его статус 'pending_verification'.
+func (r *fakeVerificationsRepo) ConsumeAndActivate(_ context.Context, tokenHash string) (uuid.UUID, error) {
+	r.mu.Lock()
+	v, ok := r.tokens[tokenHash]
+	if !ok || v.usedAt != nil || time.Now().After(v.expiresAt) {
+		r.mu.Unlock()
+		return uuid.Nil, repository.ErrNotFound
+	}
+	now := time.Now()
+	v.usedAt = &now
+	userID := v.userID
+	r.mu.Unlock()
+
+	if r.users != nil {
+		r.users.mu.Lock()
+		defer r.users.mu.Unlock()
+		u, ok := r.users.byID[userID]
+		if !ok || u.Status != domain.UserStatusPending {
+			return uuid.Nil, repository.ErrNotFound
+		}
+		u.Status = domain.UserStatusActive
+		r.users.byEmail[u.Email].Status = domain.UserStatusActive
+	}
+	return userID, nil
 }
 
 func (r *fakeVerificationsRepo) InvalidatePending(_ context.Context, userID uuid.UUID) error {
@@ -397,7 +429,7 @@ type testDeps struct {
 func newTestDeps() *testDeps {
 	users := newFakeUsers()
 	sessions := newFakeSessions()
-	verifications := newFakeVerifications()
+	verifications := newFakeVerifications(users)
 	resets := newFakeResetTokens(users, sessions)
 	audit := auditlog.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
 
@@ -736,5 +768,67 @@ func TestSession_IdleTTL_Enforced(t *testing.T) {
 	_, err = d.svc.GetSessionByToken(context.Background(), plaintext)
 	if err != auth.ErrSessionNotFound {
 		t.Fatalf("ожидали ErrSessionNotFound для истёкшей сессии, получили %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Email verification — atomicity and guard tests
+// ---------------------------------------------------------------------------
+
+// TestVerifyEmail_ParallelRaceOnlyOneSucceeds: два конкурентных запроса с одним токеном
+// должны дать ровно один Success=true, а пользователь — стать active.
+func TestVerifyEmail_ParallelRaceOnlyOneSucceeds(t *testing.T) {
+	d := newTestDeps()
+	user := d.users.add("race@test.com", testHash, domain.UserStatusPending)
+
+	plaintext, tokenHash, err := token.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.verifications.addToken(user.ID, tokenHash)
+
+	var wg sync.WaitGroup
+	results := make([]bool, 2)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = d.svc.VerifyEmail(context.Background(), plaintext).Success
+		}(i)
+	}
+	wg.Wait()
+
+	successes := 0
+	for _, ok := range results {
+		if ok {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("ожидали ровно 1 успех из 2 параллельных попыток, получили %d", successes)
+	}
+	if stored := d.users.get(user.ID); stored.Status != domain.UserStatusActive {
+		t.Errorf("статус пользователя должен быть active, получили %q", stored.Status)
+	}
+}
+
+// TestVerifyEmail_BlockedUserCannotBeActivated: заблокированный пользователь с корректным
+// токеном не должен быть переведён в active.
+func TestVerifyEmail_BlockedUserCannotBeActivated(t *testing.T) {
+	d := newTestDeps()
+	user := d.users.add("blocked@test.com", testHash, domain.UserStatusBlocked)
+
+	plaintext, tokenHash, err := token.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.verifications.addToken(user.ID, tokenHash)
+
+	result := d.svc.VerifyEmail(context.Background(), plaintext)
+	if result.Success {
+		t.Fatal("заблокированный пользователь не должен быть активирован через верификацию email")
+	}
+	if stored := d.users.get(user.ID); stored.Status != domain.UserStatusBlocked {
+		t.Errorf("статус должен оставаться blocked, получили %q", stored.Status)
 	}
 }

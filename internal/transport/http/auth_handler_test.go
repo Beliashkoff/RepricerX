@@ -251,10 +251,15 @@ type verToken struct {
 type fakeVerificationsRepo struct {
 	mu     sync.Mutex
 	tokens map[string]*verToken // keyed by token hash
+	users  *fakeUsersRepo
 }
 
-func newFakeVerifications() *fakeVerificationsRepo {
-	return &fakeVerificationsRepo{tokens: make(map[string]*verToken)}
+func newFakeVerifications(users ...*fakeUsersRepo) *fakeVerificationsRepo {
+	r := &fakeVerificationsRepo{tokens: make(map[string]*verToken)}
+	if len(users) > 0 {
+		r.users = users[0]
+	}
+	return r
 }
 
 func (r *fakeVerificationsRepo) Create(_ context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
@@ -285,6 +290,31 @@ func (r *fakeVerificationsRepo) MarkUsed(_ context.Context, id uuid.UUID) error 
 		}
 	}
 	return repository.ErrNotFound
+}
+
+func (r *fakeVerificationsRepo) ConsumeAndActivate(_ context.Context, tokenHash string) (uuid.UUID, error) {
+	r.mu.Lock()
+	v, ok := r.tokens[tokenHash]
+	if !ok || v.usedAt != nil || time.Now().After(v.expiresAt) {
+		r.mu.Unlock()
+		return uuid.Nil, repository.ErrNotFound
+	}
+	now := time.Now()
+	v.usedAt = &now
+	userID := v.userID
+	r.mu.Unlock()
+
+	if r.users != nil {
+		r.users.mu.Lock()
+		defer r.users.mu.Unlock()
+		u, ok := r.users.byID[userID]
+		if !ok || u.Status != domain.UserStatusPending {
+			return uuid.Nil, repository.ErrNotFound
+		}
+		u.Status = domain.UserStatusActive
+		r.users.byEmail[u.Email].Status = domain.UserStatusActive
+	}
+	return userID, nil
 }
 
 func (r *fakeVerificationsRepo) InvalidatePending(_ context.Context, userID uuid.UUID) error {
@@ -398,7 +428,7 @@ type testDeps struct {
 func newTestDeps() *testDeps {
 	users := newFakeUsers()
 	sessions := newFakeSessions()
-	verifications := newFakeVerifications()
+	verifications := newFakeVerifications(users)
 	resets := newFakeResetTokens(users, sessions)
 	m := &fakeMailer{}
 	audit := auditlog.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -890,14 +920,10 @@ func TestVerifyEmail_ValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// создаём токен верификации напрямую в репозитории
-	ver := d.resets.users // just re-use users reference
-	_ = ver
-	// добавляем через интерфейс верификации
-	vRepo := newFakeVerifications()
+	// перестраиваем сервис с нашим vRepo (передаём d.users для ConsumeAndActivate)
+	vRepo := newFakeVerifications(d.users)
 	_ = vRepo.Create(context.Background(), u.ID, tokenHash, time.Now().Add(time.Hour))
 
-	// перестраиваем сервис с нашим vRepo
 	svc := autosvc.New(
 		d.users, d.sessions, vRepo, d.resets, d.mailer, d.audit,
 		autosvc.Config{IdleTTL: 24 * time.Hour, AbsoluteTTL: 7 * 24 * time.Hour},
