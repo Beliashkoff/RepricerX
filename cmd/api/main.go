@@ -55,9 +55,6 @@ import (
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -70,11 +67,6 @@ func main() {
 	}
 
 	log := logger.New(cfg.Environment)
-
-	if err := runMigrations(cfg.DatabaseURL, log); err != nil {
-		log.Error("миграции не применились", "error", err)
-		os.Exit(1)
-	}
 
 	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
@@ -234,24 +226,4 @@ func main() {
 		log.Error("принудительное завершение", "error", err)
 	}
 	log.Info("сервер остановлен")
-}
-
-// runMigrations применяет все pending-миграции из директории migrations/.
-func runMigrations(databaseURL string, log *slog.Logger) error {
-	m, err := migrate.New("file://migrations", databaseURL)
-	if err != nil {
-		return err
-	}
-	defer m.Close() //nolint:errcheck
-
-	if err := m.Up(); err != nil {
-		if errors.Is(err, migrate.ErrNoChange) {
-			log.Info("миграции: нет изменений")
-			return nil
-		}
-		return err
-	}
-
-	log.Info("миграции применены")
-	return nil
 }

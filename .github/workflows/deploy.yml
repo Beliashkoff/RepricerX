@@ -1,43 +1,96 @@
 name: Deploy to Production
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: [main]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "Immutable image tag to deploy, usually a main-branch commit SHA"
+        required: true
 
-# Гарантирует что только один деплой выполняется одновременно
 concurrency:
   group: production-deploy
   cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
 
 jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
-    # Деплой только после успешного CI
-    needs: []
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    env:
+      IMAGE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.event.workflow_run.head_sha }}
 
     steps:
+      - name: Resolve image names
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_ns="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/repricerx"
+          {
+            echo "API_IMAGE=${image_ns}/api:${IMAGE_SHA}"
+            echo "WORKER_IMAGE=${image_ns}/worker:${IMAGE_SHA}"
+            echo "WEB_IMAGE=${image_ns}/web:${IMAGE_SHA}"
+          } >> "$GITHUB_ENV"
+          {
+            echo "api_image=${image_ns}/api:${IMAGE_SHA}"
+            echo "worker_image=${image_ns}/worker:${IMAGE_SHA}"
+            echo "web_image=${image_ns}/web:${IMAGE_SHA}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE_SHA: ${{ env.IMAGE_SHA }}
+          API_IMAGE: ${{ steps.images.outputs.api_image }}
+          WORKER_IMAGE: ${{ steps.images.outputs.worker_image }}
+          WEB_IMAGE: ${{ steps.images.outputs.web_image }}
         with:
           host: ${{ secrets.PROD_SSH_HOST }}
           username: ${{ secrets.PROD_SSH_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
+          envs: IMAGE_SHA,API_IMAGE,WORKER_IMAGE,WEB_IMAGE
           script: |
             set -euo pipefail
             cd /home/repricer/RepricerX
 
-            echo "==> git pull"
-            git pull origin main
+            echo "==> sync deployment manifests"
+            git fetch --depth 1 origin "${IMAGE_SHA}"
+            git checkout --force "${IMAGE_SHA}"
 
-            echo "==> build changed services"
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml build api worker web
+            mkdir -p .deploy
+            if [ -f .deploy/current.env ]; then
+              cp .deploy/current.env .deploy/previous.env
+            fi
 
-            echo "==> up -d"
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+            export API_IMAGE WORKER_IMAGE WEB_IMAGE
+
+            echo "==> pull immutable images"
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml pull api worker web
+
+            echo "==> run migrations"
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml rm -f migrate || true
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up --no-build --no-deps --exit-code-from migrate migrate
+
+            echo "==> start application"
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d --no-build api worker web nginx
 
             echo "==> waiting for API health..."
             timeout 60 bash -c 'until docker exec repricer_api wget -qO- http://localhost:8080/healthz > /dev/null 2>&1; do sleep 2; done'
+
+            cat > .deploy/current.env <<EOF
+            IMAGE_SHA=${IMAGE_SHA}
+            API_IMAGE=${API_IMAGE}
+            WORKER_IMAGE=${WORKER_IMAGE}
+            WEB_IMAGE=${WEB_IMAGE}
+            EOF
 
             echo "==> prune old images"
             docker image prune -f

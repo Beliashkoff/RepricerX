@@ -1,6 +1,10 @@
 # Production Compose.
 # Запуск: docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
 # Секреты: .env.prod на сервере (не коммитить в git).
+# Production deploy must set immutable image tags:
+#   API_IMAGE=ghcr.io/<owner>/repricerx/api:<git-sha>
+#   WORKER_IMAGE=ghcr.io/<owner>/repricerx/worker:<git-sha>
+#   WEB_IMAGE=ghcr.io/<owner>/repricerx/web:<git-sha>
 
 services:
   db:
@@ -37,9 +41,7 @@ services:
       retries: 5
 
   api:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
+    image: ${API_IMAGE:?API_IMAGE must be set to an immutable image tag}
     container_name: repricer_api
     environment:
       DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
@@ -63,6 +65,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - internal
@@ -72,10 +76,27 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    image: ${API_IMAGE:?API_IMAGE must be set to an immutable image tag}
+    container_name: repricer_migrate
+    command: ["/app/migrate"]
+    environment:
+      DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
+      REDIS_ADDR: redis:6379
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENVIRONMENT: prod
+      ALLOWED_ORIGINS: https://${DOMAIN}
+      VERIFICATION_URL_BASE: https://${DOMAIN}/verify
+      PASSWORD_RESET_URL_BASE: https://${DOMAIN}/reset-password
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - internal
+
   worker:
-    build:
-      context: .
-      dockerfile: docker/worker.Dockerfile
+    image: ${WORKER_IMAGE:?WORKER_IMAGE must be set to an immutable image tag}
     container_name: repricer_worker
     environment:
       DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
@@ -101,14 +122,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - internal
 
   web:
-    build:
-      context: .
-      dockerfile: docker/web.Dockerfile
+    image: ${WEB_IMAGE:?WEB_IMAGE must be set to an immutable image tag}
     container_name: repricer_web
     volumes:
       - web_dist:/dist
