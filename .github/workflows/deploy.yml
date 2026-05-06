@@ -52,11 +52,13 @@ jobs:
           API_IMAGE: ${{ steps.images.outputs.api_image }}
           WORKER_IMAGE: ${{ steps.images.outputs.worker_image }}
           WEB_IMAGE: ${{ steps.images.outputs.web_image }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.PROD_SSH_HOST }}
           username: ${{ secrets.PROD_SSH_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
-          envs: IMAGE_SHA,API_IMAGE,WORKER_IMAGE,WEB_IMAGE
+          envs: IMAGE_SHA,API_IMAGE,WORKER_IMAGE,WEB_IMAGE,GHCR_TOKEN,GHCR_USER
           script: |
             set -euo pipefail
             cd /home/repricer/RepricerX
@@ -72,8 +74,13 @@ jobs:
 
             export API_IMAGE WORKER_IMAGE WEB_IMAGE
 
+            echo "==> login to GHCR"
+            echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+
             echo "==> pull immutable images"
             docker compose --env-file .env.prod -f docker-compose.prod.yaml pull api worker web
+
+            docker logout ghcr.io
 
             echo "==> run migrations"
             docker compose --env-file .env.prod -f docker-compose.prod.yaml rm -f migrate || true
