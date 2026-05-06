@@ -703,8 +703,7 @@ func TestSession_IdleRenewal_Under12h(t *testing.T) {
 	}
 	if newIdle == nil {
 		t.Fatal("ожидали обновления idle TTL (< 12ч до истечения), получили nil")
-	}
-	if time.Until(*newIdle) < 23*time.Hour {
+	} else if time.Until(*newIdle) < 23*time.Hour {
 		t.Errorf("новый idle TTL слишком мал: %v", time.Until(*newIdle))
 	}
 }
