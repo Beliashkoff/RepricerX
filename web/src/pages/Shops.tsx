@@ -180,10 +180,10 @@ export default function Shops() {
                 </div>
                 <ShopStatusBadge status={shop.status} />
               </div>
-              {shop.last_checked_at && (
+              {shop.lastCheckedAt && (
                 <p className="text-xs text-[#aaa] flex items-center gap-1.5">
                   <Clock className="h-3 w-3" />
-                  Проверено: {formatDate(shop.last_checked_at)}
+                  Проверено: {formatDate(shop.lastCheckedAt)}
                 </p>
               )}
               <div className="flex gap-2 pt-1">

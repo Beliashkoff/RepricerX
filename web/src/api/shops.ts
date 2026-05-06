@@ -17,7 +17,7 @@ export const shopsApi = {
     return data
   },
 
-  update: async (id: string, payload: Partial<CreateShopRequest & { auto_update: boolean; schedule_cron: string }>): Promise<Shop> => {
+  update: async (id: string, payload: Partial<CreateShopRequest & { autoUpdateEnabled: boolean; scheduleCron: string }>): Promise<Shop> => {
     const { data } = await apiClient.patch<Shop>(`/shops/${id}`, payload)
     return data
   },

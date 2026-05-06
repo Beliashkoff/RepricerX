@@ -24,10 +24,10 @@ export interface Shop {
   name: string
   marketplace: Marketplace
   status: ShopStatus
-  last_checked_at: string | null
-  created_at: string
-  auto_update: boolean
-  schedule_cron: string | null
+  lastCheckedAt: string | null
+  createdAt: string
+  autoUpdateEnabled: boolean
+  scheduleCron: string
 }
 
 export interface CreateShopRequest {
