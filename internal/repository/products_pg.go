@@ -217,6 +217,12 @@ func (r *productsPg) BulkPatch(ctx context.Context, userID uuid.UUID, patches []
 	if len(patches) == 0 {
 		return 0, nil
 	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	batch := &pgx.Batch{}
 	for _, p := range patches {
 		batch.Queue(`
@@ -235,20 +241,31 @@ func (r *productsPg) BulkPatch(ctx context.Context, userID uuid.UUID, patches []
 			p.CostPrice.Set, p.CostPrice.Value,
 		)
 	}
-	br := r.db.SendBatch(ctx, batch)
-	defer br.Close() //nolint:errcheck
+	br := tx.SendBatch(ctx, batch)
 
 	updated := 0
 	for range patches {
 		tag, err := br.Exec()
 		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+			_ = br.Close()
+			if isCheckViolation(err) {
 				return 0, ErrConstraintViolation
 			}
 			return 0, err
 		}
 		updated += int(tag.RowsAffected())
+	}
+	if err := br.Close(); err != nil {
+		if isCheckViolation(err) {
+			return 0, ErrConstraintViolation
+		}
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		if isCheckViolation(err) {
+			return 0, ErrConstraintViolation
+		}
+		return 0, err
 	}
 	return updated, nil
 }
@@ -364,4 +381,9 @@ func scanProduct(row scannable) (*domain.Product, error) {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func isCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514"
 }

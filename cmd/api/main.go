@@ -48,6 +48,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redischeck"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
@@ -93,6 +94,7 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("Redis подключён", "addr", cfg.RedisAddr)
+	httpLimiter := redislimit.New(cfg.RedisAddr, "rx:rl:")
 
 	usersRepo := repository.NewUsersRepository(pool)
 	sessionsRepo := repository.NewSessionsRepository(pool)
@@ -138,6 +140,7 @@ func main() {
 		TrustProxy:       cfg.TrustProxyHeaders,
 		VerificationURL:  cfg.VerificationURLBase,
 		PasswordResetURL: cfg.PasswordResetURLBase,
+		RateLimiter:      httpLimiter,
 	})
 
 	if cfg.IsProd() {
@@ -167,6 +170,7 @@ func main() {
 		TrustProxy:     cfg.TrustProxyHeaders,
 		SecureCookie:   cfg.IsProd(),
 		FrontendURL:    frontendURL,
+		RateLimiter:    httpLimiter,
 	})
 
 	// Cleanup горутина: каждый час удаляем протухшие сессии и одноразовые токены.

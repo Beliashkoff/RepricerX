@@ -416,20 +416,8 @@ func (s *Service) BulkPatch(ctx context.Context, userID uuid.UUID, items []BulkP
 	}
 	repoItems := make([]repository.BulkPricePatch, 0, len(items))
 	for _, it := range items {
-		if it.MinPrice.Set && it.MinPrice.Value != nil {
-			if err := validateMoney(*it.MinPrice.Value); err != nil {
-				return 0, err
-			}
-		}
-		if it.MaxPrice.Set && it.MaxPrice.Value != nil {
-			if err := validateMoney(*it.MaxPrice.Value); err != nil {
-				return 0, err
-			}
-		}
-		if it.CostPrice.Set && it.CostPrice.Value != nil {
-			if err := validateMoney(*it.CostPrice.Value); err != nil {
-				return 0, err
-			}
+		if err := s.validateBulkPatchPrices(ctx, userID, it); err != nil {
+			return 0, err
 		}
 		repoItems = append(repoItems, repository.BulkPricePatch{
 			ProductID: it.ProductID,
@@ -439,10 +427,60 @@ func (s *Service) BulkPatch(ctx context.Context, userID uuid.UUID, items []BulkP
 		})
 	}
 	updated, err := s.products.BulkPatch(ctx, userID, repoItems)
+	if errors.Is(err, repository.ErrConstraintViolation) {
+		return 0, ErrInvalidPrice
+	}
 	if err != nil {
 		return 0, fmt.Errorf("product bulk-patch: %w", err)
 	}
 	return updated, nil
+}
+
+func (s *Service) validateBulkPatchPrices(ctx context.Context, userID uuid.UUID, item BulkPatchItem) error {
+	patch := PricePatch{
+		MinPrice:  item.MinPrice,
+		MaxPrice:  item.MaxPrice,
+		CostPrice: item.CostPrice,
+	}
+	if err := validatePatchPriceValues(patch); err != nil {
+		return err
+	}
+
+	minPrice := patch.MinPrice.Value
+	maxPrice := patch.MaxPrice.Value
+	if patch.MinPrice.Set && patch.MaxPrice.Set {
+		if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
+			return ErrInvalidPrice
+		}
+		return nil
+	}
+
+	if !bulkPatchNeedsCurrentBounds(patch) {
+		return nil
+	}
+
+	current, err := s.products.GetByIDForUser(ctx, userID, item.ProductID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return ErrProductNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("product get for bulk-patch validation: %w", err)
+	}
+	if !patch.MinPrice.Set {
+		minPrice = current.MinPrice
+	}
+	if !patch.MaxPrice.Set {
+		maxPrice = current.MaxPrice
+	}
+	if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
+		return ErrInvalidPrice
+	}
+	return nil
+}
+
+func bulkPatchNeedsCurrentBounds(patch PricePatch) bool {
+	return (patch.MinPrice.Set && patch.MinPrice.Value != nil && !patch.MaxPrice.Set) ||
+		(patch.MaxPrice.Set && patch.MaxPrice.Value != nil && !patch.MinPrice.Set)
 }
 
 func (s *Service) ExportCSV(ctx context.Context, userID uuid.UUID, filter ListFilter) ([]byte, error) {
@@ -582,6 +620,24 @@ func validatePrices(minPrice, maxPrice, costPrice *float64) error {
 }
 
 func validatePatchPrices(current *domain.Product, patch PricePatch) error {
+	if err := validatePatchPriceValues(patch); err != nil {
+		return err
+	}
+	minPrice := current.MinPrice
+	maxPrice := current.MaxPrice
+	if patch.MinPrice.Set {
+		minPrice = patch.MinPrice.Value
+	}
+	if patch.MaxPrice.Set {
+		maxPrice = patch.MaxPrice.Value
+	}
+	if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
+		return ErrInvalidPrice
+	}
+	return nil
+}
+
+func validatePatchPriceValues(patch PricePatch) error {
 	if patch.MinPrice.Set && patch.MinPrice.Value != nil {
 		if err := validateMoney(*patch.MinPrice.Value); err != nil {
 			return err
@@ -596,17 +652,6 @@ func validatePatchPrices(current *domain.Product, patch PricePatch) error {
 		if err := validateMoney(*patch.CostPrice.Value); err != nil {
 			return err
 		}
-	}
-	minPrice := current.MinPrice
-	maxPrice := current.MaxPrice
-	if patch.MinPrice.Set {
-		minPrice = patch.MinPrice.Value
-	}
-	if patch.MaxPrice.Set {
-		maxPrice = patch.MaxPrice.Value
-	}
-	if minPrice != nil && maxPrice != nil && *minPrice > *maxPrice {
-		return ErrInvalidPrice
 	}
 	return nil
 }

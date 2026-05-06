@@ -134,6 +134,36 @@ func TestProductBulkPatchValidation(t *testing.T) {
 	mustStatus(t, resp3, http.StatusBadRequest)
 }
 
+func TestProductBulkPatchInvalidBoundsIsAtomic(t *testing.T) {
+	truncate(t)
+	client := loginAsNewUser(t, "bulk_patch_atomic")
+	shopID := createTestShop(t, client, "bulk_patch_atomic")
+	p1 := createTestProduct(t, client, shopID, "BULK-ATOMIC-001", "Product 1")
+	p2 := createTestProduct(t, client, shopID, "BULK-ATOMIC-002", "Product 2")
+
+	resp := doJSON(t, client, http.MethodPost, "/api/products/bulk-patch", map[string]any{
+		"products": []map[string]any{
+			{"id": p1["id"], "minPrice": 80.0},
+			{"id": p2["id"], "minPrice": 200.0},
+		},
+	}, withOrigin())
+	mustStatus(t, resp, http.StatusBadRequest)
+	mustErrorCode(t, resp, "invalid_price")
+
+	list := doJSON(t, client, http.MethodGet, "/api/products?q=BULK-ATOMIC-001&shopId="+shopID, nil)
+	mustStatus(t, list, http.StatusOK)
+	var listBody struct {
+		Items []map[string]any `json:"items"`
+	}
+	mustDecode(t, list, &listBody)
+	if len(listBody.Items) != 1 {
+		t.Fatalf("want 1 product, got %d", len(listBody.Items))
+	}
+	if listBody.Items[0]["minPrice"].(float64) != 90.0 {
+		t.Fatalf("bulk-patch must be atomic: want minPrice=90, got %v", listBody.Items[0]["minPrice"])
+	}
+}
+
 // TestProductExportCSV — GET /api/products/export возвращает CSV с заголовком.
 func TestProductExportCSV(t *testing.T) {
 	truncate(t)

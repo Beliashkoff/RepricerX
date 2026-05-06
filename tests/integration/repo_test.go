@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -233,6 +234,87 @@ func TestSessionsRepo_ExpiredSession(t *testing.T) {
 	_, err := sessRepo.GetByTokenHash(ctx, hashHex)
 	if err != repository.ErrNotFound {
 		t.Fatalf("want ErrNotFound for expired session, got %v", err)
+	}
+}
+
+func TestProductsRepoBulkPatchRollbackOnConstraint(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	usersRepo := repository.NewUsersRepository(testPool)
+	shopsRepo := repository.NewShopsRepository(testPool)
+	productsRepo := repository.NewProductsRepository(testPool)
+
+	user := &domain.User{
+		ID:           uuid.New(),
+		Email:        "bulk-repo@example.com",
+		PasswordHash: "h",
+		DisplayName:  "Bulk Repo",
+		Status:       domain.UserStatusActive,
+	}
+	if err := usersRepo.Create(ctx, user); err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+
+	now := time.Now().UTC()
+	shop := &domain.Shop{
+		ID:                   uuid.New(),
+		UserID:               user.ID,
+		Marketplace:          domain.MarketplaceWB,
+		Name:                 "Bulk repo shop",
+		CredentialsEncrypted: []byte("{}"),
+		Status:               domain.ShopStatusActive,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	if err := shopsRepo.Create(ctx, shop); err != nil {
+		t.Fatalf("Create shop: %v", err)
+	}
+
+	initialMin := 90.0
+	initialMax := 150.0
+	p1, err := productsRepo.Create(ctx, user.ID, repository.ProductCreateInput{
+		ShopID:       shop.ID,
+		ExternalSKU:  "BULK-REPO-1",
+		Name:         "Bulk repo product 1",
+		CurrentPrice: 100,
+		Currency:     "RUB",
+		Status:       domain.ProductStatusActive,
+		MinPrice:     &initialMin,
+		MaxPrice:     &initialMax,
+	})
+	if err != nil {
+		t.Fatalf("Create product 1: %v", err)
+	}
+	p2, err := productsRepo.Create(ctx, user.ID, repository.ProductCreateInput{
+		ShopID:       shop.ID,
+		ExternalSKU:  "BULK-REPO-2",
+		Name:         "Bulk repo product 2",
+		CurrentPrice: 100,
+		Currency:     "RUB",
+		Status:       domain.ProductStatusActive,
+		MinPrice:     &initialMin,
+		MaxPrice:     &initialMax,
+	})
+	if err != nil {
+		t.Fatalf("Create product 2: %v", err)
+	}
+
+	validMin := 80.0
+	invalidMin := 200.0
+	_, err = productsRepo.BulkPatch(ctx, user.ID, []repository.BulkPricePatch{
+		{ProductID: p1.ID, MinPrice: repository.OptionalFloat64{Set: true, Value: &validMin}},
+		{ProductID: p2.ID, MinPrice: repository.OptionalFloat64{Set: true, Value: &invalidMin}},
+	})
+	if !errors.Is(err, repository.ErrConstraintViolation) {
+		t.Fatalf("want ErrConstraintViolation, got %v", err)
+	}
+
+	got, err := productsRepo.GetByIDForUser(ctx, user.ID, p1.ID)
+	if err != nil {
+		t.Fatalf("Get product 1: %v", err)
+	}
+	if got.MinPrice == nil || *got.MinPrice != initialMin {
+		t.Fatalf("bulk-patch must rollback prior updates: want minPrice=%v, got %v", initialMin, got.MinPrice)
 	}
 }
 

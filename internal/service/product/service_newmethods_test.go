@@ -16,10 +16,11 @@ import (
 // ─── fakes ───────────────────────────────────────────────────────────────────
 
 type fakeProductsRepo struct {
-	products      map[uuid.UUID]*domain.Product
-	softDeleted   map[uuid.UUID]bool
-	bulkPatched   []repository.BulkPricePatch
-	exported      []domain.Product
+	products     map[uuid.UUID]*domain.Product
+	softDeleted  map[uuid.UUID]bool
+	bulkPatched  []repository.BulkPricePatch
+	bulkPatchErr error
+	exported     []domain.Product
 }
 
 func newFakeProductsRepo(products ...*domain.Product) *fakeProductsRepo {
@@ -73,6 +74,9 @@ func (r *fakeProductsRepo) SoftDelete(_ context.Context, _ uuid.UUID, productID 
 }
 
 func (r *fakeProductsRepo) BulkPatch(_ context.Context, _ uuid.UUID, patches []repository.BulkPricePatch) (int, error) {
+	if r.bulkPatchErr != nil {
+		return 0, r.bulkPatchErr
+	}
 	r.bulkPatched = patches
 	return len(patches), nil
 }
@@ -96,7 +100,9 @@ type fakeImportLogRepo struct {
 	listErr      error
 }
 
-func (r *fakeImportLogRepo) HasRunning(_ context.Context, _ uuid.UUID) (bool, error) { return false, nil }
+func (r *fakeImportLogRepo) HasRunning(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
 func (r *fakeImportLogRepo) Create(_ context.Context, _ *domain.ImportLogEntry) error { return nil }
 func (r *fakeImportLogRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.ImportLogEntry, error) {
 	return nil, repository.ErrNotFound
@@ -134,7 +140,8 @@ func newFakeShopsRepo(shops ...*domain.Shop) *fakeShopsRepo {
 }
 
 func (r *fakeShopsRepo) Create(_ context.Context, s *domain.Shop) error {
-	r.shops[s.ID] = s; return nil
+	r.shops[s.ID] = s
+	return nil
 }
 func (r *fakeShopsRepo) GetByID(_ context.Context, id, userID uuid.UUID) (*domain.Shop, error) {
 	s, ok := r.shops[id]
@@ -147,10 +154,12 @@ func (r *fakeShopsRepo) ListByUserID(_ context.Context, userID uuid.UUID) ([]*do
 	return nil, nil
 }
 func (r *fakeShopsRepo) Update(_ context.Context, s *domain.Shop) error {
-	r.shops[s.ID] = s; return nil
+	r.shops[s.ID] = s
+	return nil
 }
 func (r *fakeShopsRepo) Delete(_ context.Context, id, _ uuid.UUID) error {
-	delete(r.shops, id); return nil
+	delete(r.shops, id)
+	return nil
 }
 func (r *fakeShopsRepo) UpdateStatus(_ context.Context, id uuid.UUID, status string, t time.Time) error {
 	if s, ok := r.shops[id]; ok {
@@ -167,8 +176,8 @@ func (r *fakeJobsRepo) ClaimNext(_ context.Context, _, _ string, _ time.Duration
 	return nil, repository.ErrNotFound
 }
 func (r *fakeJobsRepo) Retry(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error { return nil }
-func (r *fakeJobsRepo) Succeed(_ context.Context, _ uuid.UUID, _ []byte) error             { return nil }
-func (r *fakeJobsRepo) Fail(_ context.Context, _ uuid.UUID, _ string, _ []byte) error      { return nil }
+func (r *fakeJobsRepo) Succeed(_ context.Context, _ uuid.UUID, _ []byte) error            { return nil }
+func (r *fakeJobsRepo) Fail(_ context.Context, _ uuid.UUID, _ string, _ []byte) error     { return nil }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -272,12 +281,14 @@ func TestSoftDeleteNotFound(t *testing.T) {
 
 func TestBulkPatchSuccess(t *testing.T) {
 	userID := uuid.New()
-	productsRepo := newFakeProductsRepo()
+	maxPrice := 150.0
+	product := &domain.Product{ID: uuid.New(), MaxPrice: &maxPrice}
+	productsRepo := newFakeProductsRepo(product)
 	svc := newSvc(newFakeShopsRepo(), productsRepo, &fakeImportLogRepo{})
 
 	minPrice := 50.0
 	items := []productsvc.BulkPatchItem{
-		{ProductID: uuid.New(), MinPrice: repository.OptionalFloat64{Set: true, Value: &minPrice}},
+		{ProductID: product.ID, MinPrice: repository.OptionalFloat64{Set: true, Value: &minPrice}},
 		{ProductID: uuid.New()},
 	}
 	updated, err := svc.BulkPatch(context.Background(), userID, items)
@@ -311,6 +322,55 @@ func TestBulkPatchNegativePriceRejected(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for negative price")
+	}
+}
+
+func TestBulkPatchMinGreaterThanCurrentMaxRejected(t *testing.T) {
+	userID := uuid.New()
+	maxPrice := 150.0
+	product := &domain.Product{ID: uuid.New(), MaxPrice: &maxPrice}
+	svc := newSvc(newFakeShopsRepo(), newFakeProductsRepo(product), &fakeImportLogRepo{})
+
+	minPrice := 200.0
+	_, err := svc.BulkPatch(context.Background(), userID, []productsvc.BulkPatchItem{
+		{ProductID: product.ID, MinPrice: repository.OptionalFloat64{Set: true, Value: &minPrice}},
+	})
+	if err != productsvc.ErrInvalidPrice {
+		t.Fatalf("want ErrInvalidPrice, got %v", err)
+	}
+}
+
+func TestBulkPatchMaxLessThanCurrentMinRejected(t *testing.T) {
+	userID := uuid.New()
+	minPrice := 90.0
+	product := &domain.Product{ID: uuid.New(), MinPrice: &minPrice}
+	svc := newSvc(newFakeShopsRepo(), newFakeProductsRepo(product), &fakeImportLogRepo{})
+
+	maxPrice := 80.0
+	_, err := svc.BulkPatch(context.Background(), userID, []productsvc.BulkPatchItem{
+		{ProductID: product.ID, MaxPrice: repository.OptionalFloat64{Set: true, Value: &maxPrice}},
+	})
+	if err != productsvc.ErrInvalidPrice {
+		t.Fatalf("want ErrInvalidPrice, got %v", err)
+	}
+}
+
+func TestBulkPatchConstraintViolationMappedToInvalidPrice(t *testing.T) {
+	productsRepo := newFakeProductsRepo()
+	productsRepo.bulkPatchErr = repository.ErrConstraintViolation
+	svc := newSvc(newFakeShopsRepo(), productsRepo, &fakeImportLogRepo{})
+
+	minPrice := 10.0
+	maxPrice := 20.0
+	_, err := svc.BulkPatch(context.Background(), uuid.New(), []productsvc.BulkPatchItem{
+		{
+			ProductID: uuid.New(),
+			MinPrice:  repository.OptionalFloat64{Set: true, Value: &minPrice},
+			MaxPrice:  repository.OptionalFloat64{Set: true, Value: &maxPrice},
+		},
+	})
+	if err != productsvc.ErrInvalidPrice {
+		t.Fatalf("want ErrInvalidPrice, got %v", err)
 	}
 }
 
@@ -412,4 +472,3 @@ func TestGetImportErrorsNotFound(t *testing.T) {
 		t.Fatalf("want ErrImportNotFound, got %v", err)
 	}
 }
-

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -68,26 +69,26 @@ func handleProductErr(c *gin.Context, err error) {
 		errResp(c, http.StatusTooManyRequests, "import_cooldown", "Повторный импорт для магазина временно недоступен")
 		return
 	}
-	switch err {
-	case productsvc.ErrShopNotFound:
+	switch {
+	case errors.Is(err, productsvc.ErrShopNotFound):
 		errResp(c, http.StatusNotFound, "shop_not_found", "Магазин не найден")
-	case productsvc.ErrProductNotFound:
+	case errors.Is(err, productsvc.ErrProductNotFound):
 		errResp(c, http.StatusNotFound, "product_not_found", "Товар не найден")
-	case productsvc.ErrDuplicateSKU:
+	case errors.Is(err, productsvc.ErrDuplicateSKU):
 		errResp(c, http.StatusConflict, "duplicate_sku", "SKU уже существует в этом магазине")
-	case productsvc.ErrImportAlreadyRunning:
+	case errors.Is(err, productsvc.ErrImportAlreadyRunning):
 		errResp(c, http.StatusConflict, "import_already_running", "Импорт для магазина уже выполняется")
-	case productsvc.ErrImportCooldown:
+	case errors.Is(err, productsvc.ErrImportCooldown):
 		errResp(c, http.StatusTooManyRequests, "import_cooldown", "Повторный импорт для магазина временно недоступен")
-	case productsvc.ErrImportNotFound:
+	case errors.Is(err, productsvc.ErrImportNotFound):
 		errResp(c, http.StatusNotFound, "import_not_found", "Импорт не найден")
-	case productsvc.ErrInvalidProduct:
+	case errors.Is(err, productsvc.ErrInvalidProduct):
 		errResp(c, http.StatusBadRequest, "invalid_product", "Некорректные данные товара")
-	case productsvc.ErrInvalidPrice:
+	case errors.Is(err, productsvc.ErrInvalidPrice), errors.Is(err, repository.ErrConstraintViolation):
 		errResp(c, http.StatusBadRequest, "invalid_price", "Некорректные значения цен")
-	case productsvc.ErrInvalidMarketplace:
+	case errors.Is(err, productsvc.ErrInvalidMarketplace):
 		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
-	case productsvc.ErrImportNotCancelable:
+	case errors.Is(err, productsvc.ErrImportNotCancelable):
 		errResp(c, http.StatusConflict, "import_not_cancelable", "Импорт не может быть отменён (уже завершён или не найден)")
 	default:
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")

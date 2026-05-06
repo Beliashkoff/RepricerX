@@ -15,6 +15,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/netutil"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/password"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/token"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/google/uuid"
@@ -36,6 +37,7 @@ type Config struct {
 	TrustProxy       bool
 	VerificationURL  string // базовый URL без query string
 	PasswordResetURL string // базовый URL без query string
+	RateLimiter      redislimit.Limiter
 }
 
 // Service — основной auth-сервис.
@@ -168,15 +170,13 @@ func (s *Service) VerifyEmail(ctx context.Context, plaintextToken string) *Verif
 // ResendVerification повторно отправляет письмо верификации.
 // Всегда возвращает nil — не раскрывает существование email.
 func (s *Service) ResendVerification(ctx context.Context, email string) error {
-	// Rate-limit: не чаще 1 раза в минуту на email.
-	s.resendMu.Lock()
-	lastAt, ok := s.resendLastAt[email]
-	if ok && time.Since(lastAt) < time.Minute {
-		s.resendMu.Unlock()
+	email = strings.TrimSpace(email)
+	if email == "" {
 		return nil
 	}
-	s.resendLastAt[email] = time.Now()
-	s.resendMu.Unlock()
+	if s.resendRateLimited(ctx, email) {
+		return nil
+	}
 
 	user, err := s.users.GetByEmail(ctx, email)
 	if err != nil || user.Status != domain.UserStatusPending {
@@ -202,7 +202,7 @@ func (s *Service) ForgotPassword(ctx context.Context, email string) error {
 		return nil
 	}
 
-	if s.resetRateLimited(email) {
+	if s.forgotRateLimited(ctx, email) {
 		return nil
 	}
 
@@ -254,7 +254,7 @@ func (s *Service) ResetPassword(ctx context.Context, r *http.Request, plaintextT
 	if r != nil {
 		ipPrefix = netutil.IPPrefix(r, s.cfg.TrustProxy)
 	}
-	if s.resetAttemptRateLimited(ipPrefix, tokenHash) {
+	if s.resetAttemptRateLimited(ctx, ipPrefix, tokenHash) {
 		return ErrInvalidResetToken
 	}
 
@@ -429,7 +429,60 @@ func (s *Service) resetRateLimited(email string) bool {
 	return false
 }
 
-func (s *Service) resetAttemptRateLimited(ipPrefix, tokenHash string) bool {
+func (s *Service) resendRateLimited(ctx context.Context, email string) bool {
+	key := strings.ToLower(email)
+	if s.cfg.RateLimiter != nil {
+		result, err := s.cfg.RateLimiter.Allow(ctx, redislimit.Key("auth:service:resend:email", key), 1, time.Minute)
+		return err != nil || !result.Allowed
+	}
+
+	now := time.Now()
+	s.resendMu.Lock()
+	defer s.resendMu.Unlock()
+
+	for k, at := range s.resendLastAt {
+		if now.Sub(at) > time.Hour {
+			delete(s.resendLastAt, k)
+		}
+	}
+
+	lastAt, ok := s.resendLastAt[key]
+	if ok && now.Sub(lastAt) < time.Minute {
+		return true
+	}
+	s.resendLastAt[key] = now
+	return false
+}
+
+func (s *Service) forgotRateLimited(ctx context.Context, email string) bool {
+	key := strings.ToLower(email)
+	if s.cfg.RateLimiter != nil {
+		result, err := s.cfg.RateLimiter.Allow(ctx, redislimit.Key("auth:service:forgot:email", key), 1, time.Minute)
+		return err != nil || !result.Allowed
+	}
+	return s.resetRateLimited(key)
+}
+
+func (s *Service) resetAttemptRateLimited(ctx context.Context, ipPrefix, tokenHash string) bool {
+	if s.cfg.RateLimiter != nil {
+		for _, item := range []struct {
+			scope string
+			value string
+		}{
+			{scope: "auth:service:reset:ip", value: ipPrefix},
+			{scope: "auth:service:reset:token", value: tokenHash},
+		} {
+			if item.value == "" {
+				continue
+			}
+			result, err := s.cfg.RateLimiter.Allow(ctx, redislimit.Key(item.scope, item.value), 1, 2*time.Second)
+			if err != nil || !result.Allowed {
+				return true
+			}
+		}
+		return false
+	}
+
 	now := time.Now()
 
 	s.resetMu.Lock()

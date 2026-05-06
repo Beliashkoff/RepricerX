@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
@@ -25,6 +26,8 @@ type RouterConfig struct {
 	TrustProxy     bool
 	SecureCookie   bool   // true в prod
 	FrontendURL    string // куда редиректить после email-verify
+	RateLimiter    redislimit.Limiter
+	MaxBodyBytes   int64
 }
 
 // RegisterRoutes регистрирует все HTTP-маршруты приложения на переданном engine.
@@ -37,6 +40,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+	r.Use(bodySizeLimit(cfg.MaxBodyBytes))
 
 	authH := NewAuthHandler(cfg.AuthSvc, cfg.SecureCookie, cfg.FrontendURL)
 	shopH := NewShopHandler(cfg.ShopSvc)
@@ -49,11 +53,23 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	public := r.Group("/api/auth")
 	{
 		public.POST("/register", authH.Register)
-		public.POST("/login", authH.Login)
+		public.POST("/login", rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "auth:login:ip", Limit: limitLoginIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
+			rateLimitSpec{Scope: "auth:login:email", Limit: limitLoginEmail, Window: time.Minute, Key: jsonFieldRateKey("email")},
+		), authH.Login)
 		public.GET("/verify", authH.VerifyEmail)
-		public.POST("/verification/resend", authH.ResendVerification)
-		public.POST("/password/forgot", authH.ForgotPassword)
-		public.POST("/password/reset", authH.ResetPassword)
+		public.POST("/verification/resend", rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "auth:resend:ip", Limit: limitPasswordIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
+			rateLimitSpec{Scope: "auth:resend:email", Limit: limitPasswordEmail, Window: time.Hour, Key: jsonFieldRateKey("email")},
+		), authH.ResendVerification)
+		public.POST("/password/forgot", rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "auth:forgot:ip", Limit: limitPasswordIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
+			rateLimitSpec{Scope: "auth:forgot:email", Limit: limitPasswordEmail, Window: time.Hour, Key: jsonFieldRateKey("email")},
+		), authH.ForgotPassword)
+		public.POST("/password/reset", rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "auth:reset:ip", Limit: limitPasswordIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
+			rateLimitSpec{Scope: "auth:reset:token", Limit: limitResetToken, Window: time.Minute, Key: jsonFieldRateKey("token")},
+		), authH.ResetPassword)
 	}
 
 	requireAuth := RequireAuth(cfg.AuthSvc, cfg.Audit, cfg.TrustProxy, cfg.SecureCookie)
@@ -66,8 +82,12 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/shops/:id", shopH.Get)
 		protected.GET("/products", productH.List)
 		protected.GET("/products/export", productH.Export)
-		protected.GET("/imports/:id", productH.GetImport)
-		protected.GET("/imports/:id/errors", productH.GetImportErrors)
+		importPollingLimit := rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "imports:poll:session", Limit: limitImportSession, Window: time.Minute, Key: sessionRateKey},
+			rateLimitSpec{Scope: "imports:poll:user", Limit: limitImportUser, Window: time.Minute, Key: userRateKey},
+		)
+		protected.GET("/imports/:id", importPollingLimit, productH.GetImport)
+		protected.GET("/imports/:id/errors", importPollingLimit, productH.GetImportErrors)
 
 		mutating := protected.Group("", requireCSRF)
 		{
