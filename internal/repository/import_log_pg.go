@@ -204,10 +204,10 @@ func (r *importLogPg) Cancel(ctx context.Context, userID, importID uuid.UUID) er
 		UPDATE import_log
 		SET status = $1, finished_at = NOW()
 		WHERE id = $2 AND user_id = $3
-		  AND status IN ($4, $5)
+		  AND status = $4
 		RETURNING job_id`,
 		domain.ImportStatusCanceled, importID, userID,
-		domain.ImportStatusPending, domain.ImportStatusRunning,
+		domain.ImportStatusPending,
 	).Scan(&jobID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -221,7 +221,7 @@ func (r *importLogPg) Cancel(ctx context.Context, userID, importID uuid.UUID) er
 			UPDATE background_jobs
 			SET status = 'canceled'::background_job_status,
 			    finished_at = NOW(), canceled_at = NOW(), updated_at = NOW()
-			WHERE id = $1 AND status IN ('pending', 'running', 'retrying')`,
+			WHERE id = $1 AND status IN ('pending', 'retrying')`,
 			*jobID,
 		)
 		if err != nil {

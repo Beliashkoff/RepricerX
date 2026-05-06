@@ -3,11 +3,13 @@
 package integration
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
 
 	mp "github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/google/uuid"
 )
 
 // TestProductSoftDelete — DELETE /api/products/:id переводит товар в archived.
@@ -230,6 +232,41 @@ func TestImportCancel(t *testing.T) {
 
 	wrongCancel := doJSON(t, client, http.MethodDelete, "/api/imports/"+otherImportID, nil, withOrigin())
 	mustStatus(t, wrongCancel, http.StatusConflict) // ErrNotFound → ErrImportNotCancelable → 409
+}
+
+// TestImportCancel_RunningImportNotCancelable — попытка отмены running-импорта возвращает 409.
+// Воркер уже вызвал MarkRunning; отмена не должна прерывать выполнение.
+func TestImportCancel_RunningImportNotCancelable(t *testing.T) {
+	truncate(t)
+	client := loginAsNewUser(t, "cancel_running")
+	shopID := createTestShop(t, client, "cancel_running")
+
+	testSKUs = []mp.SKU{
+		{ExternalSKU: "RUN-SKU", Name: "Running", CurrentPrice: 100, Currency: "RUB"},
+	}
+
+	start := doJSON(t, client, http.MethodPost, "/api/shops/"+shopID+"/products/import", nil, withOrigin())
+	mustStatus(t, start, http.StatusAccepted)
+	var importResp map[string]any
+	mustDecode(t, start, &importResp)
+	importID := importResp["importId"].(string)
+
+	// Имитируем, что воркер перехватил джоб и перевёл импорт в running.
+	_, err := testPool.Exec(context.Background(),
+		`UPDATE import_log SET status = 'running' WHERE id = $1`,
+		uuid.MustParse(importID),
+	)
+	if err != nil {
+		t.Fatalf("force running: %v", err)
+	}
+
+	// Попытка отмены running-импорта должна вернуть 409.
+	cancel := doJSON(t, client, http.MethodDelete, "/api/imports/"+importID, nil, withOrigin())
+	mustStatus(t, cancel, http.StatusConflict)
+	mustErrorCode(t, cancel, "import_not_cancelable")
+
+	// Статус не изменился — всё ещё running.
+	waitImportStatus(t, importID, "running")
 }
 
 // TestImportErrorsDrillDown — GET /api/imports/:id/errors возвращает постраничный список ошибок.
