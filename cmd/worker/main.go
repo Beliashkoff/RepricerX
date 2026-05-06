@@ -63,7 +63,7 @@ func main() {
 		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
 			return ozon.NewClient(shopID, b, limiter)
 		},
-	})
+	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

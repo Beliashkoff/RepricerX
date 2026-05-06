@@ -23,6 +23,19 @@ func TestLoad_DefaultsToLogMailer(t *testing.T) {
 	}
 }
 
+func TestLoad_ReadsWorkerMaxAttempts(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("WORKER_MAX_ATTEMPTS", "9")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.WorkerMaxAttempts != 9 {
+		t.Fatalf("WorkerMaxAttempts = %d, want 9", cfg.WorkerMaxAttempts)
+	}
+}
+
 func TestLoad_SMTPModeRequiresSettings(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("MAILER_MODE", "smtp")

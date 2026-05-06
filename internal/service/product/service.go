@@ -37,12 +37,23 @@ var (
 type MarketplaceFactory func(shopID string, credsJSON []byte) (integration.Marketplace, error)
 
 type Service struct {
-	shops      repository.ShopsRepository
-	products   repository.ProductsRepository
-	importLogs repository.ImportLogRepository
-	jobs       repository.BackgroundJobsRepository
-	secret     string
-	factories  map[string]MarketplaceFactory
+	shops             repository.ShopsRepository
+	products          repository.ProductsRepository
+	importLogs        repository.ImportLogRepository
+	jobs              repository.BackgroundJobsRepository
+	secret            string
+	factories         map[string]MarketplaceFactory
+	importMaxAttempts int
+}
+
+type Option func(*Service)
+
+func WithImportMaxAttempts(maxAttempts int) Option {
+	return func(s *Service) {
+		if maxAttempts > 0 {
+			s.importMaxAttempts = maxAttempts
+		}
+	}
 }
 
 type CreateInput struct {
@@ -115,15 +126,21 @@ func New(
 	jobs repository.BackgroundJobsRepository,
 	secret string,
 	factories map[string]MarketplaceFactory,
+	opts ...Option,
 ) *Service {
-	return &Service{
-		shops:      shops,
-		products:   products,
-		importLogs: importLogs,
-		jobs:       jobs,
-		secret:     secret,
-		factories:  factories,
+	s := &Service{
+		shops:             shops,
+		products:          products,
+		importLogs:        importLogs,
+		jobs:              jobs,
+		secret:            secret,
+		factories:         factories,
+		importMaxAttempts: defaultImportMaxAttempts,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Service) CreateManual(ctx context.Context, userID, shopID uuid.UUID, input CreateInput) (*domain.Product, error) {
@@ -191,7 +208,7 @@ func (s *Service) StartImport(ctx context.Context, userID, shopID uuid.UUID) (*d
 		return nil, ErrInvalidMarketplace
 	}
 
-	entry, _, retryAfter, err := s.importLogs.EnqueueProductImport(ctx, userID, shopID, defaultImportMaxAttempts, defaultImportCooldown)
+	entry, _, retryAfter, err := s.importLogs.EnqueueProductImport(ctx, userID, shopID, s.importMaxAttempts, defaultImportCooldown)
 	if errors.Is(err, repository.ErrDuplicate) {
 		return nil, ErrImportAlreadyRunning
 	}

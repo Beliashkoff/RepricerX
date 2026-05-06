@@ -124,7 +124,7 @@ func main() {
 		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
 			return ozon.NewClient(shopID, b, limiter)
 		},
-	})
+	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts))
 
 	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, resetRepo, m, audit, authsvc.Config{
 		IdleTTL:          24 * time.Hour,

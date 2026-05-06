@@ -94,11 +94,17 @@ func (r *fakeProductsRepo) ExportForUser(_ context.Context, _ uuid.UUID, _ repos
 // ─────────────────────────────────────────────────────────────────────────────
 
 type fakeImportLogRepo struct {
-	cancelCalled bool
-	cancelErr    error
-	listErrors   []domain.ImportLogError
-	listTotal    int
-	listErr      error
+	cancelCalled      bool
+	cancelErr         error
+	listErrors        []domain.ImportLogError
+	listTotal         int
+	listErr           error
+	enqueued          bool
+	enqueuedAttempts  int
+	enqueuedCooldown  time.Duration
+	enqueuedErr       error
+	enqueuedRetry     time.Duration
+	enqueuedImportLog *domain.ImportLogEntry
 }
 
 func (r *fakeImportLogRepo) HasRunning(_ context.Context, _ uuid.UUID) (bool, error) {
@@ -111,8 +117,18 @@ func (r *fakeImportLogRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.Imp
 func (r *fakeImportLogRepo) GetForUser(_ context.Context, _, _ uuid.UUID) (*domain.ImportLogEntry, error) {
 	return nil, repository.ErrNotFound
 }
-func (r *fakeImportLogRepo) EnqueueProductImport(_ context.Context, _, _ uuid.UUID, _ int, _ time.Duration) (*domain.ImportLogEntry, *domain.BackgroundJob, time.Duration, error) {
-	return nil, nil, 0, nil
+func (r *fakeImportLogRepo) EnqueueProductImport(_ context.Context, _, shopID uuid.UUID, maxAttempts int, cooldown time.Duration) (*domain.ImportLogEntry, *domain.BackgroundJob, time.Duration, error) {
+	r.enqueued = true
+	r.enqueuedAttempts = maxAttempts
+	r.enqueuedCooldown = cooldown
+	if r.enqueuedErr != nil {
+		return nil, nil, r.enqueuedRetry, r.enqueuedErr
+	}
+	entry := r.enqueuedImportLog
+	if entry == nil {
+		entry = &domain.ImportLogEntry{ID: uuid.New(), ShopID: shopID, Status: domain.ImportStatusPending}
+	}
+	return entry, &domain.BackgroundJob{ID: uuid.New(), MaxAttempts: maxAttempts}, 0, nil
 }
 func (r *fakeImportLogRepo) MarkRunning(_ context.Context, _ uuid.UUID) error { return nil }
 func (r *fakeImportLogRepo) Finish(_ context.Context, _ uuid.UUID, _ string, _, _, _, _, _ int, _ []domain.ImportLogError, _ time.Time) error {
@@ -199,6 +215,10 @@ func testProduct(shopID uuid.UUID) *domain.Product {
 }
 
 func newSvc(shopsRepo *fakeShopsRepo, productsRepo *fakeProductsRepo, importRepo *fakeImportLogRepo) *productsvc.Service {
+	return newSvcWithOptions(shopsRepo, productsRepo, importRepo)
+}
+
+func newSvcWithOptions(shopsRepo *fakeShopsRepo, productsRepo *fakeProductsRepo, importRepo *fakeImportLogRepo, opts ...productsvc.Option) *productsvc.Service {
 	return productsvc.New(
 		shopsRepo, productsRepo, importRepo, &fakeJobsRepo{},
 		"test-secret-32-bytes-padded!!!!",
@@ -207,6 +227,7 @@ func newSvc(shopsRepo *fakeShopsRepo, productsRepo *fakeProductsRepo, importRepo
 				return nil, nil
 			},
 		},
+		opts...,
 	)
 }
 
@@ -248,6 +269,32 @@ func TestNormalizeListFilterInvalidStatus(t *testing.T) {
 	_, err := svc.List(context.Background(), uuid.New(), productsvc.ListFilter{Status: "invalid_status"})
 	if err == nil {
 		t.Fatal("expected error for invalid status")
+	}
+}
+
+func TestStartImportUsesConfiguredMaxAttempts(t *testing.T) {
+	userID := uuid.New()
+	shop := testShop(userID)
+	importRepo := &fakeImportLogRepo{}
+	svc := newSvcWithOptions(
+		newFakeShopsRepo(shop),
+		newFakeProductsRepo(),
+		importRepo,
+		productsvc.WithImportMaxAttempts(9),
+	)
+
+	entry, err := svc.StartImport(context.Background(), userID, shop.ID)
+	if err != nil {
+		t.Fatalf("StartImport: %v", err)
+	}
+	if entry == nil {
+		t.Fatal("StartImport returned nil entry")
+	}
+	if !importRepo.enqueued {
+		t.Fatal("expected import enqueue to be called")
+	}
+	if importRepo.enqueuedAttempts != 9 {
+		t.Fatalf("max attempts = %d, want 9", importRepo.enqueuedAttempts)
 	}
 }
 
