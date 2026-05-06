@@ -76,12 +76,14 @@ func (r *fakeShopsRepo) UpdateStatus(_ context.Context, id uuid.UUID, status str
 type fakeIntLogRepo struct{}
 
 func (r *fakeIntLogRepo) Create(_ context.Context, _ *domain.IntegrationLogEntry) error { return nil }
-func (r *fakeIntLogRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error)  { return 0, nil }
+func (r *fakeIntLogRepo) DeleteOlderThan(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
 
 type fakeMarketplace struct{ authErr error }
 
-func (f *fakeMarketplace) TestAuth(_ context.Context) error                              { return f.authErr }
-func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error)        { return nil, nil }
+func (f *fakeMarketplace) TestAuth(_ context.Context) error                      { return f.authErr }
+func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error) { return nil, nil }
 func (f *fakeMarketplace) UpdatePrices(_ context.Context, _ []integration.PriceUpdate) error {
 	return nil
 }
@@ -172,11 +174,12 @@ func TestList_IsolatedByOwner(t *testing.T) {
 	svc := newSvc(repo, nil)
 
 	user1, user2 := uuid.New(), uuid.New()
-	creds := json.RawMessage(`{"api_key":"k"}`)
+	wbCreds := json.RawMessage(`{"api_key":"k"}`)
+	ozonCreds := json.RawMessage(`{"client_id":"123","api_key":"k"}`)
 
-	_, _ = svc.Create(context.Background(), user1, "wb", "Shop A", creds)
-	_, _ = svc.Create(context.Background(), user1, "ozon", "Shop B", creds)
-	_, _ = svc.Create(context.Background(), user2, "wb", "Shop C", creds)
+	_, _ = svc.Create(context.Background(), user1, "wb", "Shop A", wbCreds)
+	_, _ = svc.Create(context.Background(), user1, "ozon", "Shop B", ozonCreds)
+	_, _ = svc.Create(context.Background(), user2, "wb", "Shop C", wbCreds)
 
 	shops1, _ := svc.List(context.Background(), user1)
 	shops2, _ := svc.List(context.Background(), user2)
@@ -186,6 +189,44 @@ func TestList_IsolatedByOwner(t *testing.T) {
 	}
 	if len(shops2) != 1 {
 		t.Fatalf("user2: want 1, got %d", len(shops2))
+	}
+}
+
+func TestCreate_InvalidCredentials(t *testing.T) {
+	svc := newSvc(newFakeShopsRepo(), nil)
+
+	cases := []struct {
+		name        string
+		marketplace string
+		creds       json.RawMessage
+	}{
+		{name: "wb token field", marketplace: "wb", creds: json.RawMessage(`{"token":"abc"}`)},
+		{name: "wb extra field", marketplace: "wb", creds: json.RawMessage(`{"api_key":"abc","extra":"x"}`)},
+		{name: "wb empty api key", marketplace: "wb", creds: json.RawMessage(`{"api_key":" "}`)},
+		{name: "ozon missing client id", marketplace: "ozon", creds: json.RawMessage(`{"api_key":"abc"}`)},
+		{name: "ozon extra field", marketplace: "ozon", creds: json.RawMessage(`{"client_id":"123","api_key":"abc","extra":"x"}`)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Create(context.Background(), uuid.New(), tc.marketplace, "Shop", tc.creds)
+			if err != shopsvc.ErrInvalidCredentials {
+				t.Fatalf("want ErrInvalidCredentials, got %v", err)
+			}
+		})
+	}
+}
+
+func TestCreate_CredentialsTooLarge(t *testing.T) {
+	svc := newSvc(newFakeShopsRepo(), nil)
+	large := make([]byte, 4097)
+	for i := range large {
+		large[i] = 'x'
+	}
+
+	_, err := svc.Create(context.Background(), uuid.New(), "wb", "Shop", json.RawMessage(large))
+	if err != shopsvc.ErrInvalidCredentials {
+		t.Fatalf("want ErrInvalidCredentials, got %v", err)
 	}
 }
 
@@ -242,6 +283,20 @@ func TestUpdate_Name(t *testing.T) {
 	}
 	if updated.Name != newName {
 		t.Fatalf("want name %q, got %q", newName, updated.Name)
+	}
+}
+
+func TestUpdate_InvalidCredentials(t *testing.T) {
+	repo := newFakeShopsRepo()
+	svc := newSvc(repo, nil)
+	userID := uuid.New()
+
+	shop, _ := svc.Create(context.Background(), userID, "wb", "Shop", json.RawMessage(`{"api_key":"k"}`))
+	_, err := svc.Update(context.Background(), userID, shop.ID, shopsvc.UpdatePatch{
+		Credentials: json.RawMessage(`{"token":"new-token"}`),
+	})
+	if err != shopsvc.ErrInvalidCredentials {
+		t.Fatalf("want ErrInvalidCredentials, got %v", err)
 	}
 }
 

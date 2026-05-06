@@ -8,7 +8,7 @@ import (
 type createShopRequest struct {
 	Marketplace string          `json:"marketplace" binding:"required" example:"wb"`
 	Name        string          `json:"name"        binding:"required" example:"Мой магазин на WB"`
-	Credentials json.RawMessage `json:"credentials" binding:"required" swaggertype:"object"`
+	Credentials json.RawMessage `json:"credentials" binding:"required" swaggertype:"object" example:"{\"api_key\":\"wb-token\"}"`
 }
 
 type updateShopRequest struct {

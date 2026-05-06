@@ -2,10 +2,13 @@
 package shop
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
@@ -18,9 +21,12 @@ import (
 var (
 	ErrShopNotFound       = errors.New("shop not found")
 	ErrInvalidMarketplace = errors.New("invalid marketplace")
+	ErrInvalidCredentials = errors.New("invalid marketplace credentials")
 	ErrAuthFailed         = errors.New("marketplace auth failed")
 	ErrRateLimited        = errors.New("shop: rate limited by marketplace")
 )
+
+const maxCredentialsJSONBytes = 4 * 1024
 
 // MarketplaceFactory создаёт клиент маркетплейса. shopID — ключ для per-shop rate limiting.
 type MarketplaceFactory func(shopID string, credsJSON []byte) (integration.Marketplace, error)
@@ -60,8 +66,12 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, marketplace, nam
 	if _, ok := s.factories[marketplace]; !ok {
 		return nil, ErrInvalidMarketplace
 	}
+	normalizedCreds, err := normalizeCredentials(marketplace, credsJSON)
+	if err != nil {
+		return nil, err
+	}
 
-	encrypted, err := crypto.Encrypt(credsJSON, s.secret)
+	encrypted, err := crypto.Encrypt(normalizedCreds, s.secret)
 	if err != nil {
 		return nil, fmt.Errorf("shop create: encrypt: %w", err)
 	}
@@ -121,7 +131,11 @@ func (s *Service) Update(ctx context.Context, userID, shopID uuid.UUID, patch Up
 		if _, ok := s.factories[shop.Marketplace]; !ok {
 			return nil, ErrInvalidMarketplace
 		}
-		encrypted, err := crypto.Encrypt(patch.Credentials, s.secret)
+		normalizedCreds, err := normalizeCredentials(shop.Marketplace, patch.Credentials)
+		if err != nil {
+			return nil, err
+		}
+		encrypted, err := crypto.Encrypt(normalizedCreds, s.secret)
 		if err != nil {
 			return nil, fmt.Errorf("shop update: encrypt: %w", err)
 		}
@@ -139,6 +153,49 @@ func (s *Service) Update(ctx context.Context, userID, shopID uuid.UUID, patch Up
 		return nil, fmt.Errorf("shop update: %w", err)
 	}
 	return shop, nil
+}
+
+func normalizeCredentials(marketplace string, raw json.RawMessage) ([]byte, error) {
+	if len(raw) == 0 || len(raw) > maxCredentialsJSONBytes {
+		return nil, ErrInvalidCredentials
+	}
+	switch marketplace {
+	case domain.MarketplaceWB:
+		var creds domain.WBCredentials
+		if err := decodeStrictCredentials(raw, &creds); err != nil {
+			return nil, ErrInvalidCredentials
+		}
+		creds.APIKey = strings.TrimSpace(creds.APIKey)
+		if creds.APIKey == "" {
+			return nil, ErrInvalidCredentials
+		}
+		return json.Marshal(creds)
+	case domain.MarketplaceOzon:
+		var creds domain.OzonCredentials
+		if err := decodeStrictCredentials(raw, &creds); err != nil {
+			return nil, ErrInvalidCredentials
+		}
+		creds.ClientID = strings.TrimSpace(creds.ClientID)
+		creds.APIKey = strings.TrimSpace(creds.APIKey)
+		if creds.ClientID == "" || creds.APIKey == "" {
+			return nil, ErrInvalidCredentials
+		}
+		return json.Marshal(creds)
+	default:
+		return nil, ErrInvalidMarketplace
+	}
+}
+
+func decodeStrictCredentials(raw []byte, target any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return ErrInvalidCredentials
+	}
+	return nil
 }
 
 // Delete удаляет магазин.

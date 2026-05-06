@@ -78,7 +78,7 @@ func (h *ShopHandler) Get(c *gin.Context) {
 //	@Description	Создаёт новый магазин, сохраняет API-ключи в зашифрованном виде (AES-GCM).
 //	@Description
 //	@Description	Формат поля `credentials` зависит от маркетплейса:
-//	@Description	- **wb** (Wildberries): `{"token": "<API-токен>"}`
+//	@Description	- **wb** (Wildberries): `{"api_key": "<API-токен>"}`
 //	@Description	  Токен можно получить в личном кабинете WB: Настройки → Доступ к API.
 //	@Description	- **ozon**: `{"client_id": "<Client-ID>", "api_key": "<API-ключ>"}`
 //	@Description	  Ключи доступны в кабинете Ozon Seller: Настройки → API-ключи.

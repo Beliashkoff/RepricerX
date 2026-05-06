@@ -977,7 +977,7 @@
                         "SessionCookie": []
                     }
                 ],
-                "description": "Создаёт новый магазин, сохраняет API-ключи в зашифрованном виде (AES-GCM).\n\nФормат поля `credentials` зависит от маркетплейса:\n- **wb** (Wildberries): `{\"token\": \"\u003cAPI-токен\u003e\"}`\nТокен можно получить в личном кабинете WB: Настройки → Доступ к API.\n- **ozon**: `{\"client_id\": \"\u003cClient-ID\u003e\", \"api_key\": \"\u003cAPI-ключ\u003e\"}`\nКлючи доступны в кабинете Ozon Seller: Настройки → API-ключи.",
+                "description": "Создаёт новый магазин, сохраняет API-ключи в зашифрованном виде (AES-GCM).\n\nФормат поля `credentials` зависит от маркетплейса:\n- **wb** (Wildberries): `{\"api_key\": \"\u003cAPI-токен\u003e\"}`\nТокен можно получить в личном кабинете WB: Настройки → Доступ к API.\n- **ozon**: `{\"client_id\": \"\u003cClient-ID\u003e\", \"api_key\": \"\u003cAPI-ключ\u003e\"}`\nКлючи доступны в кабинете Ozon Seller: Настройки → API-ключи.",
                 "consumes": [
                     "application/json"
                 ],

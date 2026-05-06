@@ -232,6 +232,8 @@ export default function Products() {
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [errorImportId, setErrorImportId] = useState<string | null>(null)
   const [activeImportId, setActiveImportId] = useState<string | null>(null)
+  const [lastImportId, setLastImportId] = useState<string | null>(null)
+  const [lastImportStatus, setLastImportStatus] = useState<ImportStatus | null>(null)
 
   // debounce search
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -285,15 +287,20 @@ export default function Products() {
   })
 
   useEffect(() => {
-    const status = importStatusQuery.data?.status
+    const data = importStatusQuery.data
+    const status = data?.status
     if (!status || !terminalStatuses.includes(status)) return
+    if (activeImportId) {
+      setLastImportId(activeImportId)
+      setLastImportStatus(data)
+    }
     if (status === 'succeeded') toast.success('Импорт завершён')
     if (status === 'partial') toast.warning('Импорт завершён с пропущенными SKU')
     if (status === 'failed') toast.error('Импорт завершился с ошибкой')
     if (status === 'canceled') toast.info('Импорт отменён')
     queryClient.invalidateQueries({ queryKey: ['products'] })
     setActiveImportId(null)
-  }, [importStatusQuery.data?.status, queryClient])
+  }, [activeImportId, importStatusQuery.data, queryClient])
 
   // mutations
   const importMutation = useMutation({
@@ -303,6 +310,8 @@ export default function Products() {
     },
     onSuccess: data => {
       setActiveImportId(data.importId)
+      setLastImportId(null)
+      setLastImportStatus(null)
       toast.success('Импорт поставлен в очередь')
     },
     onError: (e: Error) => toast.error(e.message),
@@ -368,9 +377,10 @@ export default function Products() {
     onError: () => toast.error('Ошибка архивирования'),
   })
 
-  const importStatus = importStatusQuery.data
-  const isImportActive = importStatus && activeImportStatuses.includes(importStatus.status)
-  const isImportTerminal = importStatus && terminalStatuses.includes(importStatus.status)
+  const visibleImportId = activeImportId ?? lastImportId
+  const importStatus = activeImportId ? importStatusQuery.data : lastImportStatus
+  const isImportActive = Boolean(activeImportId && importStatus && activeImportStatuses.includes(importStatus.status))
+  const isImportTerminal = Boolean(importStatus && terminalStatuses.includes(importStatus.status))
 
   return (
     <AppLayout>
@@ -399,7 +409,7 @@ export default function Products() {
       />
 
       {/* ── Import status bar ── */}
-      {activeImportId && importStatus && (
+      {visibleImportId && importStatus && (
         <div className="mb-4 bg-[#fffbe6] border border-[#ffcc00] rounded-xl px-4 py-3 flex items-center justify-between gap-4 text-sm">
           <div className="flex items-center gap-3">
             {isImportActive && (
@@ -418,7 +428,7 @@ export default function Products() {
             {isImportActive && (
               <Button
                 variant="secondary" size="sm"
-                onClick={() => cancelImportMutation.mutate(activeImportId)}
+                onClick={() => activeImportId && cancelImportMutation.mutate(activeImportId)}
                 disabled={cancelImportMutation.isPending}
               >
                 Отменить
@@ -427,12 +437,12 @@ export default function Products() {
             {isImportTerminal && importStatus.failed > 0 && (
               <Button
                 variant="secondary" size="sm"
-                onClick={() => setErrorImportId(activeImportId)}
+                onClick={() => setErrorImportId(visibleImportId)}
               >
                 Детали ошибок
               </Button>
             )}
-            <button onClick={() => setActiveImportId(null)}>
+            <button onClick={() => { setActiveImportId(null); setLastImportId(null); setLastImportStatus(null) }}>
               <X className="h-4 w-4 text-[#aaa] hover:text-[#666]" />
             </button>
           </div>

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +104,45 @@ func TestShopCreate_MissingFields(t *testing.T) {
 		// name and credentials missing
 	}, withOrigin())
 	mustStatus(t, resp, http.StatusBadRequest)
+}
+
+func TestShopCreate_InvalidCredentials(t *testing.T) {
+	truncate(t)
+	client := loginAsNewUser(t, "create_bad_creds")
+
+	cases := []struct {
+		name        string
+		marketplace string
+		credentials json.RawMessage
+	}{
+		{name: "wb token field", marketplace: "wb", credentials: json.RawMessage(`{"token":"test-wb-token"}`)},
+		{name: "wb extra field", marketplace: "wb", credentials: json.RawMessage(`{"api_key":"test-wb-token","extra":"x"}`)},
+		{name: "ozon missing client id", marketplace: "ozon", credentials: json.RawMessage(`{"api_key":"test-ozon-key"}`)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := doJSON(t, client, http.MethodPost, "/api/shops", map[string]any{
+				"marketplace": tc.marketplace,
+				"name":        "Shop",
+				"credentials": tc.credentials,
+			}, withOrigin())
+			mustStatus(t, resp, http.StatusBadRequest)
+			mustErrorCode(t, resp, "invalid_credentials")
+		})
+	}
+}
+
+func TestShopCreate_CredentialsTooLarge(t *testing.T) {
+	truncate(t)
+	client := loginAsNewUser(t, "create_large_creds")
+	resp := doJSON(t, client, http.MethodPost, "/api/shops", map[string]any{
+		"marketplace": "wb",
+		"name":        "Shop",
+		"credentials": map[string]any{"api_key": strings.Repeat("x", 4097)},
+	}, withOrigin())
+	mustStatus(t, resp, http.StatusBadRequest)
+	mustErrorCode(t, resp, "invalid_credentials")
 }
 
 func TestShopCreate_WB_Success(t *testing.T) {

@@ -50,6 +50,8 @@ func handleShopErr(c *gin.Context, err error) {
 		errResp(c, http.StatusNotFound, "shop_not_found", "Магазин не найден")
 	case shopsvc.ErrInvalidMarketplace:
 		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
+	case shopsvc.ErrInvalidCredentials:
+		errResp(c, http.StatusBadRequest, "invalid_credentials", "Некорректные учётные данные маркетплейса")
 	case shopsvc.ErrAuthFailed:
 		errResp(c, http.StatusUnprocessableEntity, "auth_failed", "Ошибка авторизации в маркетплейсе")
 	case shopsvc.ErrRateLimited:
