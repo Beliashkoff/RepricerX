@@ -82,12 +82,7 @@ services:
     command: ["/app/migrate"]
     environment:
       DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
-      REDIS_ADDR: redis:6379
       APP_SECRET_KEY: ${APP_SECRET_KEY}
-      ENVIRONMENT: prod
-      ALLOWED_ORIGINS: https://${DOMAIN}
-      VERIFICATION_URL_BASE: https://${DOMAIN}/verify
-      PASSWORD_RESET_URL_BASE: https://${DOMAIN}/reset-password
     depends_on:
       db:
         condition: service_healthy
