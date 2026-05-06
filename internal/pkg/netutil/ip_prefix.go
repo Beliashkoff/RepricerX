@@ -10,8 +10,10 @@ import (
 // IPPrefix возвращает сетевой префикс IP-адреса клиента (/24 для IPv4, /64 для IPv6).
 // Используется для fingerprint-сессий: мягкое обнаружение смены сети без инвалидации.
 //
-// Если trustProxy=true, сначала смотрим X-Forwarded-For (берём самый левый, т. е. клиентский).
-// В dev/без прокси trustProxy должен быть false — иначе клиент может подделать заголовок.
+// Если trustProxy=true, forwarded headers используются только когда непосредственный peer
+// выглядит как доверенный reverse proxy. X-Forwarded-For разбирается справа налево:
+// клиентским считается первый адрес до trusted proxy hops, а не spoofable leftmost значение.
+// В dev/без прокси trustProxy должен быть false.
 func IPPrefix(r *http.Request, trustProxy bool) string {
 	ip := extractIP(r, trustProxy)
 	if ip == nil {
@@ -30,25 +32,55 @@ func IPPrefix(r *http.Request, trustProxy bool) string {
 }
 
 func extractIP(r *http.Request, trustProxy bool) net.IP {
-	if trustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.SplitN(xff, ",", 2)
-			if ip := net.ParseIP(strings.TrimSpace(parts[0])); ip != nil {
-				return ip
-			}
-		}
+	remoteIP := remoteAddrIP(r)
+	if !trustProxy || !isTrustedProxyIP(remoteIP) {
+		return remoteIP
+	}
 
-		if xri := r.Header.Get("X-Real-IP"); xri != "" {
-			if ip := net.ParseIP(strings.TrimSpace(xri)); ip != nil {
-				return ip
-			}
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if ip := clientIPFromXForwardedFor(xff); ip != nil {
+			return ip
 		}
 	}
 
-	// не доверяем прокси
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		if ip := net.ParseIP(strings.TrimSpace(xri)); ip != nil {
+			return ip
+		}
+	}
+
+	return remoteIP
+}
+
+func remoteAddrIP(r *http.Request) net.IP {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return net.ParseIP(r.RemoteAddr)
 	}
 	return net.ParseIP(host)
+}
+
+func clientIPFromXForwardedFor(value string) net.IP {
+	parts := strings.Split(value, ",")
+	var rightmostValid net.IP
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip := net.ParseIP(strings.TrimSpace(parts[i]))
+		if ip == nil {
+			continue
+		}
+		if rightmostValid == nil {
+			rightmostValid = ip
+		}
+		if !isTrustedProxyIP(ip) {
+			return ip
+		}
+	}
+	return rightmostValid
+}
+
+func isTrustedProxyIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }

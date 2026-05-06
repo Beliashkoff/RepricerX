@@ -36,6 +36,39 @@ func TestIPPrefix_XForwardedFor_TrustProxy(t *testing.T) {
 	}
 }
 
+func TestIPPrefix_XForwardedFor_IgnoresSpoofedLeftmost(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "172.28.0.10:443"
+	r.Header.Set("X-Forwarded-For", "198.51.100.77, 203.0.113.5")
+
+	got := IPPrefix(r, true)
+	if got != "203.0.113.0/24" {
+		t.Errorf("ожидали 203.0.113.0/24, получили %s", got)
+	}
+}
+
+func TestIPPrefix_XForwardedFor_IgnoredWhenRemoteIsNotTrustedProxy(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "203.0.113.5:443"
+	r.Header.Set("X-Forwarded-For", "198.51.100.77")
+
+	got := IPPrefix(r, true)
+	if got != "203.0.113.0/24" {
+		t.Errorf("ожидали 203.0.113.0/24, получили %s", got)
+	}
+}
+
+func TestIPPrefix_XForwardedFor_AllTrustedFallsBackToRightmost(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "172.28.0.10:443"
+	r.Header.Set("X-Forwarded-For", "10.10.20.30, 172.28.0.10")
+
+	got := IPPrefix(r, true)
+	if got != "172.28.0.0/24" {
+		t.Errorf("ожидали 172.28.0.0/24, получили %s", got)
+	}
+}
+
 func TestIPPrefix_XForwardedFor_NoTrust(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "10.0.0.1:80"
