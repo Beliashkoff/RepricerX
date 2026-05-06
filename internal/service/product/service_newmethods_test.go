@@ -2,6 +2,7 @@ package product_test
 
 import (
 	"context"
+	"encoding/csv"
 	"strings"
 	"testing"
 	"time"
@@ -401,6 +402,59 @@ func TestExportCSVHeaderAndRows(t *testing.T) {
 	}
 	if !strings.Contains(csvStr, "Красный чайник") {
 		t.Fatalf("CSV must contain product name, got: %s", csvStr)
+	}
+}
+
+func TestExportCSVSanitizesFormulaInjection(t *testing.T) {
+	userID := uuid.New()
+	productsRepo := newFakeProductsRepo()
+	productsRepo.exported = []domain.Product{
+		{
+			ID:           uuid.New(),
+			ShopID:       uuid.New(),
+			ExternalSKU:  "=cmd|' /C calc'!A0",
+			Name:         "  +SUM(1,1)",
+			CurrentPrice: 1999.99,
+			Currency:     "RUB",
+			Status:       domain.ProductStatusActive,
+			UpdatedAt:    time.Now(),
+		},
+		{
+			ID:           uuid.New(),
+			ShopID:       uuid.New(),
+			ExternalSKU:  "\t@unsafe",
+			Name:         "normal name",
+			CurrentPrice: 100,
+			Currency:     "RUB",
+			Status:       domain.ProductStatusActive,
+			UpdatedAt:    time.Now(),
+		},
+	}
+	svc := newSvc(newFakeShopsRepo(), productsRepo, &fakeImportLogRepo{})
+
+	csvBytes, err := svc.ExportCSV(context.Background(), userID, productsvc.ListFilter{})
+	if err != nil {
+		t.Fatalf("ExportCSV: %v", err)
+	}
+
+	records, err := csv.NewReader(strings.NewReader(string(csvBytes))).ReadAll()
+	if err != nil {
+		t.Fatalf("read exported csv: %v", err)
+	}
+	if len(records) != 3 {
+		t.Fatalf("want header plus 2 product rows, got %d", len(records))
+	}
+	if records[1][2] != "'=cmd|' /C calc'!A0" {
+		t.Fatalf("formula SKU must be prefixed with apostrophe, got %q", records[1][2])
+	}
+	if records[1][3] != "'  +SUM(1,1)" {
+		t.Fatalf("formula name with leading spaces must be prefixed with apostrophe, got %q", records[1][3])
+	}
+	if records[2][2] != "'\t@unsafe" {
+		t.Fatalf("tab-prefixed SKU must be prefixed with apostrophe, got %q", records[2][2])
+	}
+	if records[2][3] != "normal name" {
+		t.Fatalf("safe text must not be modified, got %q", records[2][3])
 	}
 }
 

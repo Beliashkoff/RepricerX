@@ -500,11 +500,11 @@ func (s *Service) ExportCSV(ctx context.Context, userID uuid.UUID, filter ListFi
 		row := []string{
 			p.ID.String(),
 			p.ShopID.String(),
-			p.ExternalSKU,
-			p.Name,
+			csvSafeText(p.ExternalSKU),
+			csvSafeText(p.Name),
 			fmt.Sprintf("%.2f", p.CurrentPrice),
-			p.Currency,
-			p.Status,
+			csvSafeText(p.Currency),
+			csvSafeText(p.Status),
 			nullableFloat(p.MinPrice),
 			nullableFloat(p.MaxPrice),
 			nullableFloat(p.CostPrice),
@@ -517,6 +517,25 @@ func (s *Service) ExportCSV(ctx context.Context, userID uuid.UUID, filter ListFi
 		return nil, fmt.Errorf("product export csv: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+func csvSafeText(value string) string {
+	if value == "" {
+		return value
+	}
+	if value[0] == '\t' || value[0] == '\r' || value[0] == '\n' {
+		return "'" + value
+	}
+	trimmed := strings.TrimLeft(value, " \t\r\n")
+	if trimmed == "" {
+		return value
+	}
+	switch trimmed[0] {
+	case '=', '+', '-', '@':
+		return "'" + value
+	default:
+		return value
+	}
 }
 
 func nullableFloat(v *float64) string {
