@@ -57,4 +57,5 @@ web/.env.local
 /.claude
 /.codex
 AGENT.md
+AGENTS.md
 CLAUDE.md
