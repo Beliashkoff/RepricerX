@@ -6,7 +6,9 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
+	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
+	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	strategysvc "github.com/Beliashkoff/RepricerX/internal/service/strategy"
@@ -22,6 +24,8 @@ type RouterConfig struct {
 	ShopSvc        *shopsvc.Service
 	ProductSvc     *productsvc.Service
 	StrategySvc    *strategysvc.Service
+	PricingSvc     *pricingsvc.Service
+	AuditSvc       *auditsvc.Service
 	UsersRepo      repository.UsersRepository
 	Audit          *auditlog.Logger
 	AllowedOrigins []string
@@ -48,6 +52,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	shopH := NewShopHandler(cfg.ShopSvc)
 	productH := NewProductHandler(cfg.ProductSvc)
 	strategyH := NewStrategyHandler(cfg.StrategySvc)
+	pricingH := NewPricingHandler(cfg.PricingSvc)
+	auditH := NewAuditHandler(cfg.AuditSvc)
 
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -87,6 +93,9 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/products/export", productH.Export)
 		protected.GET("/strategies", strategyH.List)
 		protected.GET("/strategies/:id", strategyH.Get)
+		protected.GET("/audit/price-changes", auditH.ListChanges)
+		protected.GET("/audit/summary", auditH.Summary)
+		protected.GET("/audit/export", auditH.ExportCSV)
 		importPollingLimit := rateLimit(cfg.RateLimiter,
 			rateLimitSpec{Scope: "imports:poll:session", Limit: limitImportSession, Window: time.Minute, Key: sessionRateKey},
 			rateLimitSpec{Scope: "imports:poll:user", Limit: limitImportUser, Window: time.Minute, Key: userRateKey},
@@ -115,6 +124,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.DELETE("/strategies/:id", strategyH.Delete)
 			mutating.POST("/strategies/:id/assignments", strategyH.Assign)
 			mutating.DELETE("/strategies/:id/assignments", strategyH.Unassign)
+			mutating.POST("/pricing/simulate", pricingH.Simulate)
 		}
 	}
 }

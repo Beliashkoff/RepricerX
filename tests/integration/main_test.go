@@ -24,7 +24,9 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
+	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	strategysvc "github.com/Beliashkoff/RepricerX/internal/service/strategy"
@@ -171,12 +173,19 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 		repository.NewStrategiesRepository(pool),
 		repository.NewStrategyAssignmentsRepository(pool),
 	)
+	pricingSvc := pricingsvc.New(
+		repository.NewProductsRepository(pool),
+		repository.NewStrategiesRepository(pool),
+	)
+	auditSvc := auditsvc.New(repository.NewPriceChangesRepository(pool))
 
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        testShopSvc,
 		ProductSvc:     testProductSvc,
 		StrategySvc:    strategySvc,
+		PricingSvc:     pricingSvc,
+		AuditSvc:       auditSvc,
 		Audit:          audit,
 		AllowedOrigins: []string{testOrigin},
 		TrustProxy:     false,

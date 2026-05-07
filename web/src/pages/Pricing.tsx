@@ -40,10 +40,6 @@ export default function Pricing() {
     <AppLayout>
       <PageHeader title="Симуляция цен" description="Рассчитайте итоговую цену без отправки в маркетплейс" />
 
-      <div className="bg-[#fffae6] border border-[#ffcc00]/30 rounded-2xl px-5 py-3 text-xs text-[#7a6000] mb-5">
-        ⚠ Симуляция работает с mock-данными. Реальный движок расчёта — Этап 5.
-      </div>
-
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-[#e6e6e6] p-6">
           <h3 className="text-base font-semibold text-[#111] mb-5">Параметры симуляции</h3>

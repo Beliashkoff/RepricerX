@@ -8,10 +8,10 @@ import (
 )
 
 const (
-	StrategyTypeBelowMedianPct       = "below_median_pct"
+	StrategyTypeBelowMedianPct        = "below_median_pct"
 	StrategyTypeMinCompetitorPlusStep = "min_competitor_plus_step"
-	StrategyTypeMinMarginPct         = "min_margin_pct"
-	StrategyTypeFixed                = "fixed"
+	StrategyTypeMinMarginPct          = "min_margin_pct"
+	StrategyTypeFixed                 = "fixed"
 
 	FallbackPolicyKeepCurrent = "keep_current"
 	FallbackPolicySetFixed    = "set_fixed"
@@ -31,4 +31,3 @@ type Strategy struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
-

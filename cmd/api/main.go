@@ -50,7 +50,9 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redischeck"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
+	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
 	strategysvc "github.com/Beliashkoff/RepricerX/internal/service/strategy"
@@ -100,6 +102,7 @@ func main() {
 	intLogRepo := repository.NewIntegrationLogRepository(pool)
 	strategiesRepo := repository.NewStrategiesRepository(pool)
 	assignmentsRepo := repository.NewStrategyAssignmentsRepository(pool)
+	priceChangesRepo := repository.NewPriceChangesRepository(pool)
 
 	audit := auditlog.New(log)
 
@@ -121,6 +124,8 @@ func main() {
 		},
 	})
 	strategyService := strategysvc.New(strategiesRepo, assignmentsRepo)
+	pricingService := pricingsvc.New(productsRepo, strategiesRepo)
+	auditService := auditsvc.New(priceChangesRepo)
 
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
 		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
@@ -162,6 +167,8 @@ func main() {
 		ShopSvc:        shopService,
 		ProductSvc:     productService,
 		StrategySvc:    strategyService,
+		PricingSvc:     pricingService,
+		AuditSvc:       auditService,
 		UsersRepo:      usersRepo,
 		Audit:          audit,
 		AllowedOrigins: cfg.AllowedOrigins,

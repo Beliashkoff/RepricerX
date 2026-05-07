@@ -119,4 +119,3 @@ func scanStrategy(row scannable) (*domain.Strategy, error) {
 	}
 	return &s, nil
 }
-

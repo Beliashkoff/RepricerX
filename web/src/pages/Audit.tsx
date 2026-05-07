@@ -30,10 +30,6 @@ export default function Audit() {
         }
       />
 
-      <div className="bg-[#fffae6] border border-[#ffcc00]/30 rounded-2xl px-5 py-3 text-xs text-[#7a6000] mb-5">
-        ⚠ Данные mock — журнал реальных изменений появится в Этапе 6.
-      </div>
-
       {summary && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {[

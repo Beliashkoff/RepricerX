@@ -26,6 +26,9 @@ export default function Dashboard() {
   const { data: changes = [] } = useQuery({ queryKey: ['audit'], queryFn: auditApi.listChanges })
 
   const activeShops = shops.filter(s => s.status === 'active').length
+  const successPct = summary && summary.total_updates > 0
+    ? `${Math.round(summary.successful_updates / summary.total_updates * 100)}%`
+    : '—'
 
   return (
     <AppLayout>
@@ -34,7 +37,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard label="Магазины" value={shops.length} sub={`${activeShops} активных`} />
         <StatCard label="Обновлений за 30 дней" value={summary?.total_updates ?? '—'} sub="всего изменений" accent />
-        <StatCard label="Успешных" value={summary ? `${Math.round(summary.successful_updates / summary.total_updates * 100)}%` : '—'} sub="от общего числа" />
+        <StatCard label="Успешных" value={successPct} sub="от общего числа" />
         <StatCard label="Среднее изменение" value={summary ? `${summary.avg_change_pct.toFixed(1)}%` : '—'} sub="за период" />
       </div>
 
