@@ -170,6 +170,16 @@ func TestShopCreate_WB_Success(t *testing.T) {
 	if shop["id"] == nil || shop["id"] == "" {
 		t.Fatal("want non-empty id")
 	}
+	for _, key := range []string{"autoUpdateEnabled", "scheduleCron", "lastCheckedAt", "createdAt"} {
+		if _, ok := shop[key]; !ok {
+			t.Fatalf("response must contain camelCase key %q", key)
+		}
+	}
+	for _, key := range []string{"auto_update_enabled", "schedule_cron", "last_checked_at", "created_at"} {
+		if _, ok := shop[key]; ok {
+			t.Fatalf("response must not contain snake_case key %q", key)
+		}
+	}
 }
 
 func TestShopCreate_Ozon_Success(t *testing.T) {
@@ -262,6 +272,39 @@ func TestShopUpdate_Name(t *testing.T) {
 	mustDecode(t, updated, &body)
 	if body["name"] != "New Name" {
 		t.Fatalf("want name %q, got %v", "New Name", body["name"])
+	}
+}
+
+func TestShopUpdate_CamelCaseSettings(t *testing.T) {
+	truncate(t)
+	client := loginAsNewUser(t, "update_settings")
+
+	resp := doJSON(t, client, http.MethodPost, "/api/shops", map[string]any{
+		"marketplace": "wb", "name": "Shop", "credentials": wbCreds(),
+	}, withOrigin())
+	var created map[string]any
+	mustDecode(t, resp, &created)
+	shopID := created["id"].(string)
+
+	updated := doJSON(t, client, http.MethodPatch, "/api/shops/"+shopID, map[string]any{
+		"autoUpdateEnabled": true,
+		"scheduleCron":      "0 */4 * * *",
+	}, withOrigin())
+	mustStatus(t, updated, http.StatusOK)
+
+	var body map[string]any
+	mustDecode(t, updated, &body)
+	if body["autoUpdateEnabled"] != true {
+		t.Fatalf("want autoUpdateEnabled=true, got %v", body["autoUpdateEnabled"])
+	}
+	if body["scheduleCron"] != "0 */4 * * *" {
+		t.Fatalf("want scheduleCron updated, got %v", body["scheduleCron"])
+	}
+	if _, ok := body["auto_update_enabled"]; ok {
+		t.Fatal("response must not contain auto_update_enabled")
+	}
+	if _, ok := body["schedule_cron"]; ok {
+		t.Fatal("response must not contain schedule_cron")
 	}
 }
 
@@ -359,6 +402,12 @@ func TestShopTestConnection_Success(t *testing.T) {
 	mustDecode(t, shopResp, &shopData)
 	if shopData["status"] != "active" {
 		t.Fatalf("shop status should be active after successful test, got %v", shopData["status"])
+	}
+	if shopData["lastCheckedAt"] == nil || shopData["lastCheckedAt"] == "" {
+		t.Fatalf("lastCheckedAt must be set after successful test, got %v", shopData["lastCheckedAt"])
+	}
+	if _, ok := shopData["last_checked_at"]; ok {
+		t.Fatal("response must not contain last_checked_at")
 	}
 }
 
