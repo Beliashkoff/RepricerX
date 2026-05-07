@@ -1,7 +1,4 @@
-# worker.Dockerfile — фоновый worker (планировщик, обработка задач).
-# Сейчас cmd/worker/main.go — stub, контейнер сразу завершается.
-# restart: unless-stopped в compose перезапускает его без последствий.
-# Заработает автоматически когда появится реализация.
+# worker.Dockerfile — фоновый worker для durable background jobs.
 
 FROM golang:1.25-alpine AS builder
 
