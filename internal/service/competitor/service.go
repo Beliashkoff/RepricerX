@@ -184,7 +184,7 @@ func normalizeOzonTarget(raw string, maxLen int) (normalizedTarget, error) {
 		return normalizedTarget{}, ErrInvalidTarget
 	}
 	id := ""
-	targetURL := value
+	targetURL := ""
 	if productIDPattern.MatchString(value) && !strings.Contains(value, "://") {
 		id = productIDPattern.FindString(value)
 		targetURL = "https://www.ozon.ru/product/" + id + "/"
