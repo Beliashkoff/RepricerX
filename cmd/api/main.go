@@ -137,7 +137,7 @@ func main() {
 	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts))
 
 	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, resetRepo, m, audit, authsvc.Config{
-		IdleTTL:          24 * time.Hour,
+		IdleTTL:          cfg.SessionIdleTTL,
 		AbsoluteTTL:      cfg.SessionAbsoluteTTL,
 		TrustProxy:       cfg.TrustProxyHeaders,
 		VerificationURL:  cfg.VerificationURLBase,

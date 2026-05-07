@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func setRequiredEnv(t *testing.T) {
@@ -33,6 +34,23 @@ func TestLoad_ReadsWorkerMaxAttempts(t *testing.T) {
 	}
 	if cfg.WorkerMaxAttempts != 9 {
 		t.Fatalf("WorkerMaxAttempts = %d, want 9", cfg.WorkerMaxAttempts)
+	}
+}
+
+func TestLoad_ReadsSessionTTLs(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("SESSION_IDLE_TTL", "2h")
+	t.Setenv("SESSION_ABSOLUTE_TTL", "48h")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.SessionIdleTTL != 2*time.Hour {
+		t.Fatalf("SessionIdleTTL = %v, want 2h", cfg.SessionIdleTTL)
+	}
+	if cfg.SessionAbsoluteTTL != 48*time.Hour {
+		t.Fatalf("SessionAbsoluteTTL = %v, want 48h", cfg.SessionAbsoluteTTL)
 	}
 }
 
