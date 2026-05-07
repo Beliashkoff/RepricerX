@@ -25,7 +25,8 @@ func (r *strategyAssignmentsPg) AssignToProducts(ctx context.Context, userID, st
 		WHERE p.id = ANY($2::uuid[])
 		  AND s.user_id = $3
 		  AND EXISTS (SELECT 1 FROM strategies WHERE id=$1 AND user_id=$3)
-		ON CONFLICT (product_id) DO UPDATE SET strategy_id = EXCLUDED.strategy_id`,
+		ON CONFLICT (product_id) WHERE product_id IS NOT NULL
+		DO UPDATE SET strategy_id = EXCLUDED.strategy_id`,
 		strategyID, productIDs, userID,
 	)
 	return err
