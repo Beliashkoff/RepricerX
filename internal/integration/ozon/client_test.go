@@ -45,6 +45,16 @@ func checkOzonAuth(t *testing.T, r *http.Request) {
 	}
 }
 
+func writeOzonStocks(t *testing.T, w http.ResponseWriter, items []map[string]any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"result": map[string]any{"items": items},
+	}); err != nil {
+		t.Fatalf("encode stocks: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestAuth
 // ---------------------------------------------------------------------------
@@ -99,6 +109,7 @@ func TestOzon_TestAuth_Unauthorized(t *testing.T) {
 
 func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 	listCalled := 0
+	stocksCalled := 0
 	infoCalled := 0
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +126,26 @@ func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 					"last_id": "",
 					"total":   2,
 				},
+			})
+
+		case "/v4/product/info/stocks":
+			stocksCalled++
+			checkOzonAuth(t, r)
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
+			filter, _ := body["filter"].(map[string]any)
+			ids, _ := filter["product_id"].([]any)
+			if len(ids) != 2 {
+				t.Errorf("stocks: ожидали 2 product_id, получили %d", len(ids))
+			}
+			writeOzonStocks(t, w, []map[string]any{
+				{"product_id": 11, "stocks": []map[string]any{
+					{"type": "fbo", "present": 10, "reserved": 2},
+					{"type": "fbs", "present": 4, "reserved": 4},
+				}},
+				{"product_id": 22, "stocks": []map[string]any{
+					{"type": "rfbs", "present": 7, "reserved": 1},
+				}},
 			})
 
 		case "/v3/product/info/list":
@@ -149,11 +180,20 @@ func TestOzon_ListSKUs_TwoPhase(t *testing.T) {
 	if listCalled != 1 {
 		t.Errorf("ожидали 1 запрос к /v3/product/list, сделано %d", listCalled)
 	}
+	if stocksCalled != 1 {
+		t.Errorf("ожидали 1 запрос к /v4/product/info/stocks, сделано %d", stocksCalled)
+	}
 	if infoCalled != 1 {
 		t.Errorf("ожидали 1 запрос к /v3/product/info/list, сделано %d", infoCalled)
 	}
 	if len(skus) != 2 {
 		t.Fatalf("ожидали 2 SKU, получили %d", len(skus))
+	}
+	if skus[0].StockCount != 8 {
+		t.Errorf("SKU-A stock: получили %d, ожидали 8", skus[0].StockCount)
+	}
+	if skus[1].StockCount != 6 {
+		t.Errorf("SKU-B stock: получили %d, ожидали 6", skus[1].StockCount)
 	}
 }
 
@@ -183,6 +223,8 @@ func TestOzon_ListSKUs_PriceFromString(t *testing.T) {
 							"total": 1,
 						},
 					})
+				case "/v4/product/info/stocks":
+					writeOzonStocks(t, w, nil)
 				case "/v3/product/info/list":
 					json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
 						"items": []map[string]any{
@@ -223,6 +265,8 @@ func TestOzon_ListSKUs_InvalidPrice_ReturnsError(t *testing.T) {
 					{"product_id": 1, "offer_id": "BAD-1", "name": "X", "price": "not-a-number"},
 				},
 			})
+		case "/v4/product/info/stocks":
+			writeOzonStocks(t, w, nil)
 		}
 	}))
 	defer ts.Close()
@@ -287,6 +331,8 @@ func TestOzon_ListSKUs_Pagination(t *testing.T) {
 				}
 			}
 			json.NewEncoder(w).Encode(map[string]any{"items": items}) //nolint:errcheck
+		case "/v4/product/info/stocks":
+			writeOzonStocks(t, w, nil)
 		}
 	}))
 	defer ts.Close()
@@ -300,6 +346,148 @@ func TestOzon_ListSKUs_Pagination(t *testing.T) {
 	}
 	if len(skus) != 105 {
 		t.Errorf("ожидали 105 SKU (100+5), получили %d", len(skus))
+	}
+}
+
+func TestOzon_ListSKUs_StocksSumAvailableAcrossWarehouses(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v3/product/list":
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"result": map[string]any{
+					"items": []map[string]any{{"product_id": 77, "offer_id": "SKU-STOCK"}},
+					"total": 1,
+				},
+			})
+		case "/v4/product/info/stocks":
+			writeOzonStocks(t, w, []map[string]any{
+				{"product_id": 77, "stocks": []map[string]any{
+					{"type": "fbo", "present": 10, "reserved": 3},
+					{"type": "fbs", "present": 5, "reserved": 1},
+					{"type": "rfbs", "present": 2, "reserved": 4},
+				}},
+			})
+		case "/v3/product/info/list":
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"items": []map[string]any{
+					{"product_id": 77, "offer_id": "SKU-STOCK", "name": "Товар", "price": "100.00"},
+				},
+			})
+		default:
+			t.Errorf("неожиданный путь: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	skus, err := newTestClient(ts.URL).ListSKUs(t.Context())
+	if err != nil {
+		t.Fatalf("ListSKUs: %v", err)
+	}
+	if len(skus) != 1 {
+		t.Fatalf("ожидали 1 SKU, получили %d", len(skus))
+	}
+	if skus[0].StockCount != 11 {
+		t.Errorf("stock: получили %d, ожидали 11", skus[0].StockCount)
+	}
+}
+
+func TestOzon_ListSKUs_StocksUnauthorized(t *testing.T) {
+	for _, code := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(fmt.Sprintf("HTTP_%d", code), func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v3/product/list":
+					json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+						"result": map[string]any{
+							"items": []map[string]any{{"product_id": 1, "offer_id": "SKU-1"}},
+							"total": 1,
+						},
+					})
+				case "/v4/product/info/stocks":
+					w.WriteHeader(code)
+				default:
+					t.Errorf("неожиданный путь: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer ts.Close()
+
+			_, err := newTestClient(ts.URL).ListSKUs(t.Context())
+			if !errors.Is(err, integration.ErrUnauthorized) {
+				t.Fatalf("HTTP %d: ожидали ErrUnauthorized, получили %v", code, err)
+			}
+		})
+	}
+}
+
+func TestOzon_ListSKUs_StocksRateLimited(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v3/product/list":
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"result": map[string]any{
+					"items": []map[string]any{{"product_id": 1, "offer_id": "SKU-1"}},
+					"total": 1,
+				},
+			})
+		case "/v4/product/info/stocks":
+			w.WriteHeader(http.StatusTooManyRequests)
+		default:
+			t.Errorf("неожиданный путь: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	_, err := newTestClient(ts.URL).ListSKUs(t.Context())
+	if !errors.Is(err, integration.ErrRateLimited) {
+		t.Fatalf("ожидали ErrRateLimited, получили %v", err)
+	}
+}
+
+func TestOzon_ListSKUs_EmptyAndPartialStocksDefaultToZero(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v3/product/list":
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"result": map[string]any{
+					"items": []map[string]any{
+						{"product_id": 1, "offer_id": "SKU-EMPTY"},
+						{"product_id": 2, "offer_id": "SKU-MISSING"},
+					},
+					"total": 2,
+				},
+			})
+		case "/v4/product/info/stocks":
+			writeOzonStocks(t, w, []map[string]any{
+				{"product_id": 1, "stocks": []map[string]any{}},
+			})
+		case "/v3/product/info/list":
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"items": []map[string]any{
+					{"product_id": 1, "offer_id": "SKU-EMPTY", "name": "Пустой остаток", "price": "10.00"},
+					{"product_id": 2, "offer_id": "SKU-MISSING", "name": "Нет данных", "price": "20.00"},
+				},
+			})
+		default:
+			t.Errorf("неожиданный путь: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	skus, err := newTestClient(ts.URL).ListSKUs(t.Context())
+	if err != nil {
+		t.Fatalf("ListSKUs: %v", err)
+	}
+	if len(skus) != 2 {
+		t.Fatalf("ожидали 2 SKU, получили %d", len(skus))
+	}
+	for _, sku := range skus {
+		if sku.StockCount != 0 {
+			t.Errorf("%s stock: получили %d, ожидали 0", sku.ExternalSKU, sku.StockCount)
+		}
 	}
 }
 

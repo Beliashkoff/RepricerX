@@ -361,6 +361,214 @@
                 }
             }
         },
+        "/api/competitors/{competitorId}": {
+            "delete": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Удаляет competitor link и историю цен. Доступ ограничен владельцем товара.",
+                "tags": [
+                    "competitors"
+                ],
+                "summary": "Удалить конкурента",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID конкурента",
+                        "name": "competitorId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Конкурент удалён"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Сбрасывает последнюю цену и статус проверки, затем сохраняет новый Ozon URL/public product ID.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "competitors"
+                ],
+                "summary": "Обновить ссылку конкурента",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID конкурента",
+                        "name": "competitorId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "target: Ozon URL или public product ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/transport.competitorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Обновлённый конкурент",
+                        "schema": {
+                            "$ref": "#/definitions/transport.competitorResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/competitors/{competitorId}/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Проверяет публичную страницу Ozon через изолированный adapter, сохраняет safe status/error code и snapshot. Raw parser/external errors не возвращаются.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "competitors"
+                ],
+                "summary": "Обновить цену конкурента",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID конкурента",
+                        "name": "competitorId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Цена обновлена",
+                        "schema": {
+                            "$ref": "#/definitions/transport.competitorResponse"
+                        }
+                    },
+                    "202": {
+                        "description": "Проверка выполнена с безопасным кодом ошибки",
+                        "schema": {
+                            "$ref": "#/definitions/transport.competitorResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/imports/{id}": {
             "get": {
                 "security": [
@@ -919,6 +1127,141 @@
                     },
                     "404": {
                         "description": "Товар не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/products/{id}/competitors": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Возвращает привязанные к товару Ozon competitor URL/public product ID. Доступ только к товарам текущего пользователя.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "competitors"
+                ],
+                "summary": "Список конкурентов товара",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Конкуренты товара",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/transport.competitorResponse"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Принимает ссылку на товар Ozon или публичный ID товара Ozon. Цена обновляется отдельным refresh-запросом.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "competitors"
+                ],
+                "summary": "Добавить конкурента к товару",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "target: Ozon URL или public product ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/transport.competitorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Созданный конкурент",
+                        "schema": {
+                            "$ref": "#/definitions/transport.competitorResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Некорректный target",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Товар не найден",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Дубликат конкурента",
                         "schema": {
                             "$ref": "#/definitions/transport.errorResponse"
                         }
@@ -1542,6 +1885,61 @@
                 }
             }
         },
+        "transport.competitorRequest": {
+            "type": "object",
+            "required": [
+                "target"
+            ],
+            "properties": {
+                "target": {
+                    "type": "string"
+                }
+            }
+        },
+        "transport.competitorResponse": {
+            "type": "object",
+            "properties": {
+                "competitorUrl": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lastAvailability": {
+                    "type": "string"
+                },
+                "lastCheckedAt": {
+                    "type": "string"
+                },
+                "lastErrorCode": {
+                    "type": "string"
+                },
+                "lastPrice": {
+                    "type": "number"
+                },
+                "lastStatus": {
+                    "type": "string"
+                },
+                "marketplace": {
+                    "type": "string"
+                },
+                "ozonPublicProductId": {
+                    "type": "string"
+                },
+                "productId": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
         "transport.createProductRequest": {
             "type": "object",
             "required": [
@@ -1576,25 +1974,7 @@
             }
         },
         "transport.createShopRequest": {
-            "type": "object",
-            "required": [
-                "credentials",
-                "marketplace",
-                "name"
-            ],
-            "properties": {
-                "credentials": {
-                    "type": "object"
-                },
-                "marketplace": {
-                    "type": "string",
-                    "example": "wb"
-                },
-                "name": {
-                    "type": "string",
-                    "example": "Мой магазин на WB"
-                }
-            }
+            "type": "object"
         },
         "transport.errorDetail": {
             "type": "object",

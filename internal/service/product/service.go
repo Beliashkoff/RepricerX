@@ -620,10 +620,17 @@ func normalizeImportRows(skus []integration.SKU) ([]repository.ProductImportRow,
 		rows = append(rows, repository.ProductImportRow{
 			ExternalSKU: externalSKU,
 			Name:        name, CurrentPrice: sku.CurrentPrice, Currency: currency,
-			Status: domain.ProductStatusActive,
+			Status: domain.ProductStatusActive, StockCount: nonNegativeInt(sku.StockCount),
 		})
 	}
 	return rows, skipped, capImportErrors(errs)
+}
+
+func nonNegativeInt(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 func validateText(value string, maxLen int, required bool) error {

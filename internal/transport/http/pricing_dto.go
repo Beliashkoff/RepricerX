@@ -8,9 +8,11 @@ type simulatePriceRequest struct {
 }
 
 type simulatePriceResponse struct {
-	TargetPrice   float64 `json:"target_price"`
-	FinalPrice    float64 `json:"final_price"`
-	ConstraintHit *string `json:"constraint_hit"`
-	Reason        string  `json:"reason"`
-	ChangePct     float64 `json:"change_pct"`
+	TargetPrice      float64  `json:"target_price"`
+	FinalPrice       float64  `json:"final_price"`
+	ConstraintHit    *string  `json:"constraint_hit"`
+	Reason           string   `json:"reason"`
+	ChangePct        float64  `json:"change_pct"`
+	CompetitorPrice  *float64 `json:"competitor_price,omitempty"`
+	CompetitorSource string   `json:"competitor_source,omitempty"`
 }

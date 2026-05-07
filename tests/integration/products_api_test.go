@@ -186,8 +186,8 @@ func TestProductImportUpsertAndFailure(t *testing.T) {
 	createTestProduct(t, client, shopID, "SKU-EXISTING", "Old name")
 
 	testSKUs = []mp.SKU{
-		{ExternalSKU: "SKU-EXISTING", Name: "Updated name", CurrentPrice: 111, Currency: "RUB"},
-		{ExternalSKU: "SKU-NEW", Name: "New product", CurrentPrice: 222, Currency: "RUB"},
+		{ExternalSKU: "SKU-EXISTING", Name: "Updated name", CurrentPrice: 111, Currency: "RUB", StockCount: 12},
+		{ExternalSKU: "SKU-NEW", Name: "New product", CurrentPrice: 222, Currency: "RUB", StockCount: 3},
 		{ExternalSKU: "", Name: "Invalid product", CurrentPrice: 10, Currency: "RUB"},
 	}
 
@@ -228,6 +228,13 @@ func TestProductImportUpsertAndFailure(t *testing.T) {
 	mustDecode(t, list, &body)
 	if len(body.Items) != 2 {
 		t.Fatalf("want 2 imported/upserted products, got %d: %#v", len(body.Items), body.Items)
+	}
+	stockBySKU := map[string]float64{}
+	for _, item := range body.Items {
+		stockBySKU[item["externalSku"].(string)] = item["stockCount"].(float64)
+	}
+	if stockBySKU["SKU-EXISTING"] != 12 || stockBySKU["SKU-NEW"] != 3 {
+		t.Fatalf("imported stock_count not persisted: %#v", stockBySKU)
 	}
 
 	failShopID := createTestShop(t, client, "import_fail")

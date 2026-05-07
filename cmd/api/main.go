@@ -52,6 +52,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -103,6 +104,7 @@ func main() {
 	strategiesRepo := repository.NewStrategiesRepository(pool)
 	assignmentsRepo := repository.NewStrategyAssignmentsRepository(pool)
 	priceChangesRepo := repository.NewPriceChangesRepository(pool)
+	competitorsRepo := repository.NewProductCompetitorsRepository(pool)
 
 	audit := auditlog.New(log)
 
@@ -124,7 +126,8 @@ func main() {
 		},
 	})
 	strategyService := strategysvc.New(strategiesRepo, assignmentsRepo)
-	pricingService := pricingsvc.New(productsRepo, strategiesRepo)
+	competitorService := competitorsvc.New(competitorsRepo, nil)
+	pricingService := pricingsvc.New(productsRepo, strategiesRepo, pricingsvc.WithCompetitors(competitorsRepo))
 	auditService := auditsvc.New(priceChangesRepo)
 
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
@@ -166,6 +169,7 @@ func main() {
 		AuthSvc:        svc,
 		ShopSvc:        shopService,
 		ProductSvc:     productService,
+		CompetitorSvc:  competitorService,
 		StrategySvc:    strategyService,
 		PricingSvc:     pricingService,
 		AuditSvc:       auditService,

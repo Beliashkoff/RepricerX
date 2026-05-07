@@ -14,6 +14,8 @@ export interface SimulateResult {
   constraint_hit: string | null
   reason: string
   change_pct: number
+  competitor_price?: number
+  competitor_source?: string
 }
 
 export const pricingApi = {

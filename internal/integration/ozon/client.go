@@ -27,6 +27,23 @@ type Client struct {
 	limiter  *ratelimit.Registry
 }
 
+type ozonStockEntry struct {
+	Type     string `json:"type"`
+	Present  int    `json:"present"`
+	Reserved int    `json:"reserved"`
+}
+
+type ozonStockItem struct {
+	ProductID    int64            `json:"product_id"`
+	Stocks       []ozonStockEntry `json:"stocks"`
+	FboPresent   int              `json:"fbo_present"`
+	FboReserved  int              `json:"fbo_reserved"`
+	FbsPresent   int              `json:"fbs_present"`
+	FbsReserved  int              `json:"fbs_reserved"`
+	RfbsPresent  int              `json:"rfbs_present"`
+	RfbsReserved int              `json:"rfbs_reserved"`
+}
+
 // NewClient создаёт клиент из JSON-сериализованных OzonCredentials.
 // shopID используется для per-shop rate limiting.
 func NewClient(shopID string, credsJSON []byte, limiter *ratelimit.Registry) (*Client, error) {
@@ -176,6 +193,14 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 	if len(allItems) == 0 {
 		return nil, nil
 	}
+	productIDs := make([]int64, 0, len(allItems))
+	for _, item := range allItems {
+		productIDs = append(productIDs, item.ProductID)
+	}
+	stockByProductID, err := c.fetchStocks(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	// 2. Получаем детали (цену, название) батчами по 100
 	var skus []integration.SKU
@@ -223,10 +248,90 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 				Name:         p.Name,
 				CurrentPrice: price,
 				Currency:     "RUB",
+				StockCount:   stockByProductID[p.ProductID],
 			})
 		}
 	}
 	return skus, nil
+}
+
+func (c *Client) fetchStocks(ctx context.Context, productIDs []int64) (map[int64]int, error) {
+	type stockResponse struct {
+		Result struct {
+			Items []ozonStockItem `json:"items"`
+		} `json:"result"`
+		Items []ozonStockItem `json:"items"`
+	}
+
+	stockByProductID := make(map[int64]int, len(productIDs))
+	for i := 0; i < len(productIDs); i += 100 {
+		end := i + 100
+		if end > len(productIDs) {
+			end = len(productIDs)
+		}
+		ids := productIDs[i:end]
+		payloadBytes, _ := json.Marshal(map[string]any{
+			"filter": map[string]any{"product_id": ids, "visibility": "ALL"},
+			"limit":  100,
+		})
+		payloadStr := string(payloadBytes)
+		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				baseURL+"/v4/product/info/stocks",
+				strings.NewReader(payloadStr))
+			if err != nil {
+				return nil, fmt.Errorf("ozon: build stocks request: %w", err)
+			}
+			c.setAuth(req)
+			return req, nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("ozon: stocks request: %w", err)
+		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			_ = resp.Body.Close()
+			return nil, integration.ErrUnauthorized
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("ozon: stocks status %d", resp.StatusCode)
+		}
+		var stocks stockResponse
+		if err := json.NewDecoder(resp.Body).Decode(&stocks); err != nil {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("ozon: decode stocks: %w", err)
+		}
+		_ = resp.Body.Close()
+		pageItems := stocks.Result.Items
+		if len(pageItems) == 0 {
+			pageItems = stocks.Items
+		}
+		for _, item := range pageItems {
+			stockByProductID[item.ProductID] = totalAvailableStock(item)
+		}
+	}
+	return stockByProductID, nil
+}
+
+func totalAvailableStock(item ozonStockItem) int {
+	total := 0
+	for _, stock := range item.Stocks {
+		total += maxInt(stock.Present-stock.Reserved, 0)
+	}
+	if total > 0 || len(item.Stocks) > 0 {
+		return total
+	}
+	total += maxInt(item.FboPresent-item.FboReserved, 0)
+	total += maxInt(item.FbsPresent-item.FbsReserved, 0)
+	total += maxInt(item.RfbsPresent-item.RfbsReserved, 0)
+	return total
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // UpdatePrices отправляет обновлённые цены через /v1/product/import/prices.

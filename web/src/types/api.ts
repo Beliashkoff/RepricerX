@@ -8,6 +8,8 @@ export type JobStatusValue = 'pending' | 'running' | 'succeeded' | 'failed' | 'c
 export type StrategyType = 'below_median_pct' | 'min_competitor_plus_step' | 'min_margin_pct' | 'fixed'
 export type FallbackPolicy = 'keep_current' | 'set_fixed' | 'set_min'
 export type PriceChangeStatus = 'success' | 'failed' | 'skipped'
+export type CompetitorStatus = 'pending' | 'ok' | 'failed' | 'rate_limited' | 'blocked' | 'disabled'
+export type CompetitorAvailability = 'unknown' | 'available' | 'out_of_stock' | 'not_found'
 
 // Auth
 export interface User {
@@ -133,6 +135,22 @@ export interface ImportErrorsPage {
   total: number
   page: number
   perPage: number
+}
+
+export interface Competitor {
+  id: string
+  productId: string
+  marketplace: Marketplace
+  source: string
+  competitorUrl: string
+  ozonPublicProductId: string | null
+  lastPrice: number | null
+  lastAvailability: CompetitorAvailability
+  lastCheckedAt: string | null
+  lastErrorCode: string
+  lastStatus: CompetitorStatus
+  createdAt: string
+  updatedAt: string
 }
 
 // Strategies

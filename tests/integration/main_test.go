@@ -20,12 +20,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/Beliashkoff/RepricerX/internal/integration"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
+	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -58,9 +60,11 @@ var (
 	testShopSvc    *shopsvc.Service
 	testProductSvc *productsvc.Service
 	// allowAuthFail управляет тем, вернёт ли fakeMarketplace ошибку auth.
-	testShopAuthFail bool
-	testSKUs         []integration.SKU
-	testListSKUsErr  error
+	testShopAuthFail        bool
+	testSKUs                []integration.SKU
+	testListSKUsErr         error
+	testCompetitorPrice     *float64
+	testCompetitorLookupErr error
 )
 
 // fakeMarketplace — заглушка адаптера маркетплейса для интеграционных тестов.
@@ -82,6 +86,19 @@ func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error)
 }
 func (f *fakeMarketplace) UpdatePrices(_ context.Context, _ []integration.PriceUpdate) error {
 	return nil
+}
+
+type fakeOzonCompetitorLookup struct{}
+
+func (fakeOzonCompetitorLookup) Lookup(_ context.Context, _ competitorsvc.OzonTarget) (competitorsvc.LookupResult, error) {
+	if testCompetitorLookupErr != nil {
+		return competitorsvc.LookupResult{}, testCompetitorLookupErr
+	}
+	return competitorsvc.LookupResult{
+		Price:        testCompetitorPrice,
+		Availability: domain.CompetitorAvailabilityAvailable,
+		Source:       "test",
+	}, nil
 }
 
 func TestMain(m *testing.M) {
@@ -176,13 +193,16 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 	pricingSvc := pricingsvc.New(
 		repository.NewProductsRepository(pool),
 		repository.NewStrategiesRepository(pool),
+		pricingsvc.WithCompetitors(repository.NewProductCompetitorsRepository(pool)),
 	)
+	competitorSvc := competitorsvc.New(repository.NewProductCompetitorsRepository(pool), fakeOzonCompetitorLookup{})
 	auditSvc := auditsvc.New(repository.NewPriceChangesRepository(pool))
 
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        testShopSvc,
 		ProductSvc:     testProductSvc,
+		CompetitorSvc:  competitorSvc,
 		StrategySvc:    strategySvc,
 		PricingSvc:     pricingSvc,
 		AuditSvc:       auditSvc,
@@ -206,6 +226,8 @@ func truncate(t *testing.T) {
 	testShopAuthFail = false
 	testSKUs = nil
 	testListSKUsErr = nil
+	testCompetitorPrice = nil
+	testCompetitorLookupErr = nil
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

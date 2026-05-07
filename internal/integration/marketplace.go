@@ -17,6 +17,7 @@ type SKU struct {
 	Name         string
 	CurrentPrice float64
 	Currency     string
+	StockCount   int
 }
 
 // PriceUpdate — задание на обновление цены одного SKU.

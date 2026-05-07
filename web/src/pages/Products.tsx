@@ -21,11 +21,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { productsApi } from '@/api/products'
+import { competitorsApi } from '@/api/competitors'
 import { shopsApi } from '@/api/shops'
 import { strategiesApi } from '@/api/strategies'
-import type { ImportStatus, Product, ProductListParams, ProductSortField, SortDir, Strategy } from '@/types/api'
+import type { Competitor, ImportStatus, Product, ProductListParams, ProductSortField, SortDir, Strategy } from '@/types/api'
 import { formatPrice, formatDate } from '@/lib/utils'
-import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X, Plus, RefreshCw, Save, Trash2, ExternalLink } from 'lucide-react'
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -53,6 +54,56 @@ function Skeleton({ className = '' }: { className?: string }) {
   return <div className={`animate-pulse bg-[#f0f0f0] rounded ${className}`} />
 }
 
+function CompetitorStatusBadge({ status }: { status: Competitor['lastStatus'] }) {
+  const variants = {
+    pending: 'secondary',
+    ok: 'success',
+    failed: 'destructive',
+    rate_limited: 'warning',
+    blocked: 'warning',
+    disabled: 'secondary',
+  } as const
+  const labels = {
+    pending: 'Ожидает',
+    ok: 'ОК',
+    failed: 'Ошибка',
+    rate_limited: 'Лимит',
+    blocked: 'Блок',
+    disabled: 'Отключён',
+  }
+  return <Badge variant={variants[status] ?? 'secondary'}>{labels[status] ?? status}</Badge>
+}
+
+function availabilityLabel(value: Competitor['lastAvailability']) {
+  const labels = {
+    unknown: 'Неизвестно',
+    available: 'В наличии',
+    out_of_stock: 'Нет в наличии',
+    not_found: 'Не найден',
+  }
+  return labels[value] ?? 'Неизвестно'
+}
+
+function competitorErrorLabel(code: string) {
+  const labels: Record<string, string> = {
+    invalid_target: 'Неверная ссылка или ID',
+    unsupported_source: 'Источник не поддерживается',
+    source_unavailable: 'Источник недоступен',
+    parse_failed: 'Не удалось прочитать цену',
+  }
+  return labels[code] ?? 'Не удалось обновить'
+}
+
+function competitorTarget(c: Competitor) {
+  return c.competitorUrl || c.ozonPublicProductId || ''
+}
+
+function competitorDisplayTarget(c: Competitor) {
+  if (c.competitorUrl) return c.competitorUrl
+  if (c.ozonPublicProductId) return `Ozon ID ${c.ozonPublicProductId}`
+  return '—'
+}
+
 // ─── EditProductModal ────────────────────────────────────────────────────────
 
 interface EditModalProps {
@@ -62,12 +113,76 @@ interface EditModalProps {
 }
 
 function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
+  const queryClient = useQueryClient()
   const [minPrice, setMinPrice] = useState(product.min_price?.toString() ?? '')
   const [maxPrice, setMaxPrice] = useState(product.max_price?.toString() ?? '')
   const [costPrice, setCostPrice] = useState(product.cost_price?.toString() ?? '')
+  const [competitorTargetInput, setCompetitorTargetInput] = useState('')
+  const [editTargets, setEditTargets] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
 
   const parseOpt = (s: string) => (s.trim() === '' ? null : Number(s))
+
+  const competitorsQueryKey = ['product-competitors', product.id]
+  const { data: competitors = [], isLoading: competitorsLoading } = useQuery({
+    queryKey: competitorsQueryKey,
+    queryFn: () => competitorsApi.list(product.id),
+  })
+
+  useEffect(() => {
+    setEditTargets(prev => {
+      const next = { ...prev }
+      competitors.forEach(c => {
+        if (next[c.id] === undefined) next[c.id] = competitorTarget(c)
+      })
+      Object.keys(next).forEach(id => {
+        if (!competitors.some(c => c.id === id)) delete next[id]
+      })
+      return next
+    })
+  }, [competitors])
+
+  const invalidateCompetitors = () => {
+    queryClient.invalidateQueries({ queryKey: competitorsQueryKey })
+  }
+
+  const createCompetitorMutation = useMutation({
+    mutationFn: (target: string) => competitorsApi.create(product.id, target),
+    onSuccess: () => {
+      setCompetitorTargetInput('')
+      invalidateCompetitors()
+      toast.success('Конкурент добавлен')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const updateCompetitorMutation = useMutation({
+    mutationFn: ({ id, target }: { id: string; target: string }) => competitorsApi.update(id, target),
+    onSuccess: () => {
+      invalidateCompetitors()
+      toast.success('Конкурент обновлён')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const deleteCompetitorMutation = useMutation({
+    mutationFn: (id: string) => competitorsApi.remove(id),
+    onSuccess: () => {
+      invalidateCompetitors()
+      toast.success('Конкурент удалён')
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const refreshCompetitorMutation = useMutation({
+    mutationFn: (id: string) => competitorsApi.refresh(id),
+    onSuccess: data => {
+      invalidateCompetitors()
+      if (data.lastStatus === 'ok') toast.success('Цена конкурента обновлена')
+      else toast.warning(competitorErrorLabel(data.lastErrorCode))
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
   const handleSave = async () => {
     setBusy(true)
@@ -103,7 +218,7 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-      <DialogContent>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="truncate">{product.name}</DialogTitle>
         </DialogHeader>
@@ -125,6 +240,124 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
               <Input type="number" min={0} step="0.01" placeholder="Не задана"
                 value={costPrice} onChange={e => setCostPrice(e.target.value)} />
             </div>
+          </div>
+          <div className="border-t border-[#f0f0f0] pt-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-[#111]">Конкуренты</h3>
+                <p className="text-xs text-[#888]">Ozon URL или публичный ID товара</p>
+              </div>
+              <Badge variant="outline">{competitors.length}</Badge>
+            </div>
+
+            <div className="flex gap-2">
+              <Input
+                placeholder="https://www.ozon.ru/product/... или ID"
+                value={competitorTargetInput}
+                onChange={e => setCompetitorTargetInput(e.target.value)}
+                disabled={createCompetitorMutation.isPending}
+              />
+              <Button
+                size="icon"
+                title="Добавить конкурента"
+                disabled={!competitorTargetInput.trim() || createCompetitorMutation.isPending}
+                onClick={() => createCompetitorMutation.mutate(competitorTargetInput.trim())}
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {competitorsLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+              </div>
+            ) : competitors.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[#e6e6e6] py-6 text-center text-sm text-[#aaa]">
+                Конкуренты не добавлены
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {competitors.map(c => {
+                  const target = editTargets[c.id] ?? competitorTarget(c)
+                  const targetChanged = target.trim() !== competitorTarget(c)
+                  const isMutating = updateCompetitorMutation.isPending || deleteCompetitorMutation.isPending || refreshCompetitorMutation.isPending
+                  return (
+                    <div key={c.id} className="rounded-xl border border-[#e6e6e6] p-3 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <CompetitorStatusBadge status={c.lastStatus} />
+                            <Badge variant="secondary">{c.marketplace.toUpperCase()}</Badge>
+                            <span className="text-xs text-[#888]">{c.source}</span>
+                            <span className="text-xs text-[#888]">{availabilityLabel(c.lastAvailability)}</span>
+                          </div>
+                          <p className="text-xs text-[#666] truncate mt-2">{competitorDisplayTarget(c)}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-sm font-semibold text-[#111]">
+                            {c.lastPrice != null ? formatPrice(c.lastPrice) : '—'}
+                          </p>
+                          <p className="text-xs text-[#aaa]">
+                            {c.lastCheckedAt ? formatDate(c.lastCheckedAt) : 'Не проверялся'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {c.lastErrorCode && (
+                        <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                          {competitorErrorLabel(c.lastErrorCode)}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                        <Input
+                          className="text-xs min-w-[180px] flex-1"
+                          value={target}
+                          onChange={e => setEditTargets(prev => ({ ...prev, [c.id]: e.target.value }))}
+                        />
+                        {c.competitorUrl && (
+                          <Button variant="secondary" size="icon" title="Открыть ссылку" aria-label="Открыть ссылку конкурента" asChild>
+                            <a href={c.competitorUrl} target="_blank" rel="noreferrer">
+                              <ExternalLink className="h-4 w-4" />
+                            </a>
+                          </Button>
+                        )}
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          title="Сохранить конкурента"
+                          aria-label="Сохранить конкурента"
+                          disabled={!target.trim() || !targetChanged || isMutating}
+                          onClick={() => updateCompetitorMutation.mutate({ id: c.id, target: target.trim() })}
+                        >
+                          <Save className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="icon"
+                          title="Обновить цену"
+                          aria-label="Обновить цену конкурента"
+                          disabled={isMutating}
+                          onClick={() => refreshCompetitorMutation.mutate(c.id)}
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          title="Удалить конкурента"
+                          aria-label="Удалить конкурента"
+                          disabled={isMutating}
+                          onClick={() => deleteCompetitorMutation.mutate(c.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter className="gap-2 flex-row justify-between">

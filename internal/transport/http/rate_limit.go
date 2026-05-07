@@ -20,13 +20,15 @@ import (
 const (
 	defaultMaxBodyBytes = 1 << 20
 
-	limitLoginIP       = 20
-	limitLoginEmail    = 10
-	limitPasswordIP    = 10
-	limitPasswordEmail = 3
-	limitResetToken    = 10
-	limitImportSession = 60
-	limitImportUser    = 120
+	limitLoginIP                  = 20
+	limitLoginEmail               = 10
+	limitPasswordIP               = 10
+	limitPasswordEmail            = 3
+	limitResetToken               = 10
+	limitImportSession            = 60
+	limitImportUser               = 120
+	limitCompetitorRefreshSession = 20
+	limitCompetitorRefreshUser    = 60
 )
 
 type rateLimitKeyFunc func(*gin.Context) (string, bool, error)

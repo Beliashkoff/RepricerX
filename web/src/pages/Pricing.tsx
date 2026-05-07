@@ -12,6 +12,12 @@ import { formatPrice } from '@/lib/utils'
 import { ArrowDown, ArrowUp, TrendingDown, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
+function competitorSourceLabel(source?: string) {
+  if (source === 'manual') return 'Ручной ввод'
+  if (source === 'auto') return 'Авто'
+  return source || '—'
+}
+
 export default function Pricing() {
   const { data: productList } = useQuery({ queryKey: ['products'], queryFn: () => productsApi.list() })
   const products = productList?.items ?? []
@@ -29,7 +35,7 @@ export default function Pricing() {
       product_id: productId,
       strategy_id: strategyId,
       current_price: selectedProduct?.current_price ?? 0,
-      competitor_price: competitorPrice ? Number(competitorPrice) : undefined,
+      competitor_price: competitorPrice.trim() ? Number(competitorPrice) : undefined,
       cost_price: selectedProduct?.cost_price ?? undefined,
     }),
     onSuccess: (data) => setResult(data),
@@ -69,7 +75,7 @@ export default function Pricing() {
               </div>
             )}
             <div>
-              <Label htmlFor="comp-price">Цена конкурента (опционально)</Label>
+              <Label htmlFor="comp-price">Ручная цена конкурента</Label>
               <Input id="comp-price" type="number" className="mt-1.5" placeholder="Например: 8500" value={competitorPrice} onChange={e => setCompetitorPrice(e.target.value)} />
             </div>
             <Button disabled={!productId || !strategyId || isPending} onClick={() => mutate()} className="mt-2">
@@ -110,6 +116,16 @@ export default function Pricing() {
                 <p className="text-xs text-[#666] mb-1">Причина</p>
                 <p className="text-sm text-[#333]">{result.reason}</p>
               </div>
+
+              {result.competitor_price != null && (
+                <div className="bg-[#f7f8fa] rounded-xl p-4">
+                  <p className="text-xs text-[#666] mb-1">Цена конкурента</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-[#111]">{formatPrice(result.competitor_price)}</p>
+                    <span className="text-xs text-[#666]">{competitorSourceLabel(result.competitor_source)}</span>
+                  </div>
+                </div>
+              )}
 
               {result.constraint_hit ? (
                 <div className="flex items-start gap-2 bg-yellow-50 rounded-xl p-3 text-xs text-yellow-700">

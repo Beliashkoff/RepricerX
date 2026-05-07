@@ -8,6 +8,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
+	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -23,6 +24,7 @@ type RouterConfig struct {
 	AuthSvc        *auth.Service
 	ShopSvc        *shopsvc.Service
 	ProductSvc     *productsvc.Service
+	CompetitorSvc  *competitorsvc.Service
 	StrategySvc    *strategysvc.Service
 	PricingSvc     *pricingsvc.Service
 	AuditSvc       *auditsvc.Service
@@ -51,6 +53,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	authH := NewAuthHandler(cfg.AuthSvc, cfg.SecureCookie, cfg.FrontendURL)
 	shopH := NewShopHandler(cfg.ShopSvc)
 	productH := NewProductHandler(cfg.ProductSvc)
+	competitorH := NewCompetitorHandler(cfg.CompetitorSvc)
 	strategyH := NewStrategyHandler(cfg.StrategySvc)
 	pricingH := NewPricingHandler(cfg.PricingSvc)
 	auditH := NewAuditHandler(cfg.AuditSvc)
@@ -91,6 +94,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/shops/:id", shopH.Get)
 		protected.GET("/products", productH.List)
 		protected.GET("/products/export", productH.Export)
+		protected.GET("/products/:id/competitors", competitorH.List)
 		protected.GET("/strategies", strategyH.List)
 		protected.GET("/strategies/:id", strategyH.Get)
 		protected.GET("/audit/price-changes", auditH.ListChanges)
@@ -99,6 +103,10 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		importPollingLimit := rateLimit(cfg.RateLimiter,
 			rateLimitSpec{Scope: "imports:poll:session", Limit: limitImportSession, Window: time.Minute, Key: sessionRateKey},
 			rateLimitSpec{Scope: "imports:poll:user", Limit: limitImportUser, Window: time.Minute, Key: userRateKey},
+		)
+		competitorRefreshLimit := rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "competitors:refresh:session", Limit: limitCompetitorRefreshSession, Window: time.Minute, Key: sessionRateKey},
+			rateLimitSpec{Scope: "competitors:refresh:user", Limit: limitCompetitorRefreshUser, Window: time.Hour, Key: userRateKey},
 		)
 		protected.GET("/imports/:id", importPollingLimit, productH.GetImport)
 		protected.GET("/imports/:id/errors", importPollingLimit, productH.GetImportErrors)
@@ -117,6 +125,10 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.PATCH("/products/:id", productH.Patch)
 			mutating.DELETE("/products/:id", productH.Delete)
 			mutating.POST("/products/bulk-patch", productH.BulkPatch)
+			mutating.POST("/products/:id/competitors", competitorH.Create)
+			mutating.PATCH("/competitors/:competitorId", competitorH.Update)
+			mutating.DELETE("/competitors/:competitorId", competitorH.Delete)
+			mutating.POST("/competitors/:competitorId/refresh", competitorRefreshLimit, competitorH.Refresh)
 			mutating.DELETE("/imports/:id", productH.CancelImport)
 
 			mutating.POST("/strategies", strategyH.Create)

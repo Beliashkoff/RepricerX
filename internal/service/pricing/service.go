@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
@@ -26,20 +27,36 @@ type SimulateInput struct {
 }
 
 type SimulateResult struct {
-	TargetPrice   float64
-	FinalPrice    float64
-	ConstraintHit *string
-	Reason        string
-	ChangePct     float64
+	TargetPrice      float64
+	FinalPrice       float64
+	ConstraintHit    *string
+	Reason           string
+	ChangePct        float64
+	CompetitorPrice  *float64
+	CompetitorSource string
 }
 
 type Service struct {
-	products   repository.ProductsRepository
-	strategies repository.StrategiesRepository
+	products         repository.ProductsRepository
+	strategies       repository.StrategiesRepository
+	competitors      repository.ProductCompetitorsRepository
+	competitorMaxAge time.Duration
 }
 
-func New(products repository.ProductsRepository, strategies repository.StrategiesRepository) *Service {
-	return &Service{products: products, strategies: strategies}
+type Option func(*Service)
+
+func WithCompetitors(repo repository.ProductCompetitorsRepository) Option {
+	return func(s *Service) {
+		s.competitors = repo
+	}
+}
+
+func New(products repository.ProductsRepository, strategies repository.StrategiesRepository, opts ...Option) *Service {
+	s := &Service{products: products, strategies: strategies, competitorMaxAge: 24 * time.Hour}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Service) Simulate(ctx context.Context, userID uuid.UUID, input SimulateInput) (*SimulateResult, error) {
@@ -60,18 +77,36 @@ func (s *Service) Simulate(ctx context.Context, userID uuid.UUID, input Simulate
 	if !strategy.Enabled {
 		return nil, fmt.Errorf("%w: strategy disabled", ErrInvalidSimulation)
 	}
+	competitorPrice := input.CompetitorPrice
+	competitorSource := ""
+	if competitorPrice != nil {
+		competitorSource = "manual"
+	} else if s.competitors != nil {
+		latest, err := s.competitors.LatestFreshPrice(ctx, userID, input.ProductID, s.competitorMaxAge)
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
+		if latest != nil {
+			competitorPrice = latest
+			competitorSource = "auto"
+		}
+	}
 
-	target, reason, err := calculateTarget(product.CurrentPrice, product.CostPrice, input, strategy)
+	calcInput := input
+	calcInput.CompetitorPrice = competitorPrice
+	target, reason, err := calculateTarget(product.CurrentPrice, product.CostPrice, calcInput, strategy)
 	if err != nil {
 		return nil, err
 	}
 	final, hit := applyConstraints(product.CurrentPrice, target, strategy.Constraints)
 	return &SimulateResult{
-		TargetPrice:   roundMoney(target),
-		FinalPrice:    roundMoney(final),
-		ConstraintHit: hit,
-		Reason:        reason,
-		ChangePct:     roundPercent(percentChange(product.CurrentPrice, final)),
+		TargetPrice:      roundMoney(target),
+		FinalPrice:       roundMoney(final),
+		ConstraintHit:    hit,
+		Reason:           reason,
+		ChangePct:        roundPercent(percentChange(product.CurrentPrice, final)),
+		CompetitorPrice:  competitorPrice,
+		CompetitorSource: competitorSource,
 	}, nil
 }
 

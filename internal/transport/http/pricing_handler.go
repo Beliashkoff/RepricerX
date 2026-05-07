@@ -45,11 +45,13 @@ func (h *pricingHandler) Simulate(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, simulatePriceResponse{
-		TargetPrice:   result.TargetPrice,
-		FinalPrice:    result.FinalPrice,
-		ConstraintHit: result.ConstraintHit,
-		Reason:        result.Reason,
-		ChangePct:     result.ChangePct,
+		TargetPrice:      result.TargetPrice,
+		FinalPrice:       result.FinalPrice,
+		ConstraintHit:    result.ConstraintHit,
+		Reason:           result.Reason,
+		ChangePct:        result.ChangePct,
+		CompetitorPrice:  result.CompetitorPrice,
+		CompetitorSource: result.CompetitorSource,
 	})
 }
 

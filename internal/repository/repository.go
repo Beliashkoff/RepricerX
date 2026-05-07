@@ -132,6 +132,42 @@ type PriceChangesRepository interface {
 	ExportForUser(ctx context.Context, userID uuid.UUID) ([]*domain.PriceChange, error)
 }
 
+type CompetitorCreateInput struct {
+	ProductID               uuid.UUID
+	Marketplace             string
+	Source                  string
+	CompetitorURL           string
+	NormalizedCompetitorURL string
+	OzonPublicProductID     *string
+	OzonSKU                 *string
+}
+
+type CompetitorUpdateInput struct {
+	CompetitorURL           string
+	NormalizedCompetitorURL string
+	OzonPublicProductID     *string
+	OzonSKU                 *string
+}
+
+type CompetitorCheckResult struct {
+	Price        *float64
+	Availability string
+	Status       string
+	ErrorCode    string
+	RawSource    string
+	CheckedAt    time.Time
+}
+
+type ProductCompetitorsRepository interface {
+	Create(ctx context.Context, userID uuid.UUID, input CompetitorCreateInput) (*domain.ProductCompetitor, error)
+	ListByProduct(ctx context.Context, userID, productID uuid.UUID) ([]*domain.ProductCompetitor, error)
+	GetByIDForUser(ctx context.Context, userID, competitorID uuid.UUID) (*domain.ProductCompetitor, error)
+	Update(ctx context.Context, userID, competitorID uuid.UUID, input CompetitorUpdateInput) (*domain.ProductCompetitor, error)
+	Delete(ctx context.Context, userID, competitorID uuid.UUID) error
+	SaveCheckResult(ctx context.Context, competitorID uuid.UUID, result CompetitorCheckResult) (*domain.ProductCompetitor, error)
+	LatestFreshPrice(ctx context.Context, userID, productID uuid.UUID, maxAge time.Duration) (*float64, error)
+}
+
 type ProductListFilter struct {
 	Query       string
 	ShopID      *uuid.UUID

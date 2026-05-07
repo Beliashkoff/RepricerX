@@ -29,6 +29,42 @@ definitions:
       updated:
         type: integer
     type: object
+  transport.competitorRequest:
+    properties:
+      target:
+        type: string
+    required:
+    - target
+    type: object
+  transport.competitorResponse:
+    properties:
+      competitorUrl:
+        type: string
+      createdAt:
+        type: string
+      id:
+        type: string
+      lastAvailability:
+        type: string
+      lastCheckedAt:
+        type: string
+      lastErrorCode:
+        type: string
+      lastPrice:
+        type: number
+      lastStatus:
+        type: string
+      marketplace:
+        type: string
+      ozonPublicProductId:
+        type: string
+      productId:
+        type: string
+      source:
+        type: string
+      updatedAt:
+        type: string
+    type: object
   transport.createProductRequest:
     properties:
       costPrice:
@@ -52,19 +88,6 @@ definitions:
     - name
     type: object
   transport.createShopRequest:
-    properties:
-      credentials:
-        type: object
-      marketplace:
-        example: wb
-        type: string
-      name:
-        example: Мой магазин на WB
-        type: string
-    required:
-    - credentials
-    - marketplace
-    - name
     type: object
   transport.errorDetail:
     properties:
@@ -615,6 +638,144 @@ paths:
       summary: Подтверждение email
       tags:
       - auth
+  /api/competitors/{competitorId}:
+    delete:
+      description: Удаляет competitor link и историю цен. Доступ ограничен владельцем
+        товара.
+      parameters:
+      - description: UUID конкурента
+        in: path
+        name: competitorId
+        required: true
+        type: string
+      responses:
+        "204":
+          description: Конкурент удалён
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Удалить конкурента
+      tags:
+      - competitors
+    patch:
+      consumes:
+      - application/json
+      description: Сбрасывает последнюю цену и статус проверки, затем сохраняет новый
+        Ozon URL/public product ID.
+      parameters:
+      - description: UUID конкурента
+        in: path
+        name: competitorId
+        required: true
+        type: string
+      - description: 'target: Ozon URL или public product ID'
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.competitorRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Обновлённый конкурент
+          schema:
+            $ref: '#/definitions/transport.competitorResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Обновить ссылку конкурента
+      tags:
+      - competitors
+  /api/competitors/{competitorId}/refresh:
+    post:
+      description: Проверяет публичную страницу Ozon через изолированный adapter,
+        сохраняет safe status/error code и snapshot. Raw parser/external errors не
+        возвращаются.
+      parameters:
+      - description: UUID конкурента
+        in: path
+        name: competitorId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Цена обновлена
+          schema:
+            $ref: '#/definitions/transport.competitorResponse'
+        "202":
+          description: Проверка выполнена с безопасным кодом ошибки
+          schema:
+            $ref: '#/definitions/transport.competitorResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Обновить цену конкурента
+      tags:
+      - competitors
   /api/imports/{id}:
     delete:
       description: Отменяет импорт со статусом pending или running. Если импорт уже
@@ -891,6 +1052,95 @@ paths:
       summary: Обновить цены товара
       tags:
       - products
+  /api/products/{id}/competitors:
+    get:
+      description: Возвращает привязанные к товару Ozon competitor URL/public product
+        ID. Доступ только к товарам текущего пользователя.
+      parameters:
+      - description: UUID товара
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Конкуренты товара
+          schema:
+            items:
+              $ref: '#/definitions/transport.competitorResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Список конкурентов товара
+      tags:
+      - competitors
+    post:
+      consumes:
+      - application/json
+      description: Принимает ссылку на товар Ozon или публичный ID товара Ozon. Цена
+        обновляется отдельным refresh-запросом.
+      parameters:
+      - description: UUID товара
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 'target: Ozon URL или public product ID'
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/transport.competitorRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Созданный конкурент
+          schema:
+            $ref: '#/definitions/transport.competitorResponse'
+        "400":
+          description: Некорректный target
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "404":
+          description: Товар не найден
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "409":
+          description: Дубликат конкурента
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Добавить конкурента к товару
+      tags:
+      - competitors
   /api/products/bulk-patch:
     post:
       consumes:
