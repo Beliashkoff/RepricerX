@@ -92,7 +92,7 @@ describe('Register — успешная регистрация', () => {
     mockLogin.mockResolvedValue({ id: 'u1', email: 'ivan@example.com', displayName: 'Иван', status: 'active', createdAt: '' })
   })
 
-  it('вызывает register, потом login, потом navigate(/dashboard)', async () => {
+  it('вызывает register и показывает экран подтверждения email', async () => {
     renderRegister()
     await userEvent.type(screen.getByLabelText(/имя/i), 'Иван')
     await userEvent.type(screen.getByLabelText(/email/i), 'ivan@example.com')
@@ -100,8 +100,10 @@ describe('Register — успешная регистрация', () => {
     fireEvent.click(screen.getByRole('button', { name: /Создать аккаунт/i }))
 
     await waitFor(() => expect(mockRegister).toHaveBeenCalledWith('ivan@example.com', 'ValidPass1', 'Иван'))
-    await waitFor(() => expect(mockLogin).toHaveBeenCalledWith('ivan@example.com', 'ValidPass1'))
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/dashboard'))
+    expect(mockLogin).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(await screen.findByText(/проверьте почту/i)).toBeInTheDocument()
+    expect(screen.getByText('ivan@example.com')).toBeInTheDocument()
   })
 })
 
