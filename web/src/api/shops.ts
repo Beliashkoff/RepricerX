@@ -26,7 +26,7 @@ export const shopsApi = {
     await apiClient.delete(`/shops/${id}`)
   },
 
-  testConnection: async (id: string): Promise<{ status: string; message: string }> => {
+  testConnection: async (id: string): Promise<{ status: string; message?: string }> => {
     const { data } = await apiClient.post(`/shops/${id}/test`)
     return data
   },
