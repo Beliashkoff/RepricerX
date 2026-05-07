@@ -1,0 +1,3 @@
+ALTER TABLE import_log
+    ALTER COLUMN finished_at TYPE TIMESTAMP USING finished_at AT TIME ZONE 'UTC',
+    ALTER COLUMN started_at TYPE TIMESTAMP USING started_at AT TIME ZONE 'UTC';

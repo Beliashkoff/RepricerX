@@ -213,8 +213,8 @@ CREATE INDEX IF NOT EXISTS idx_integration_log_correlation_id ON integration_log
 CREATE TABLE IF NOT EXISTS import_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     shop_id UUID NOT NULL REFERENCES shops(id) ON DELETE CASCADE,
-    started_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    finished_at TIMESTAMP NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ NULL,
     added INT NOT NULL DEFAULT 0,
     updated INT NOT NULL DEFAULT 0,
     errors JSONB NOT NULL DEFAULT '[]'::jsonb
