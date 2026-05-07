@@ -9,6 +9,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
+	strategysvc "github.com/Beliashkoff/RepricerX/internal/service/strategy"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -20,6 +21,7 @@ type RouterConfig struct {
 	AuthSvc        *auth.Service
 	ShopSvc        *shopsvc.Service
 	ProductSvc     *productsvc.Service
+	StrategySvc    *strategysvc.Service
 	UsersRepo      repository.UsersRepository
 	Audit          *auditlog.Logger
 	AllowedOrigins []string
@@ -45,6 +47,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	authH := NewAuthHandler(cfg.AuthSvc, cfg.SecureCookie, cfg.FrontendURL)
 	shopH := NewShopHandler(cfg.ShopSvc)
 	productH := NewProductHandler(cfg.ProductSvc)
+	strategyH := NewStrategyHandler(cfg.StrategySvc)
 
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -82,6 +85,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/shops/:id", shopH.Get)
 		protected.GET("/products", productH.List)
 		protected.GET("/products/export", productH.Export)
+		protected.GET("/strategies", strategyH.List)
+		protected.GET("/strategies/:id", strategyH.Get)
 		importPollingLimit := rateLimit(cfg.RateLimiter,
 			rateLimitSpec{Scope: "imports:poll:session", Limit: limitImportSession, Window: time.Minute, Key: sessionRateKey},
 			rateLimitSpec{Scope: "imports:poll:user", Limit: limitImportUser, Window: time.Minute, Key: userRateKey},
@@ -104,6 +109,12 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.DELETE("/products/:id", productH.Delete)
 			mutating.POST("/products/bulk-patch", productH.BulkPatch)
 			mutating.DELETE("/imports/:id", productH.CancelImport)
+
+			mutating.POST("/strategies", strategyH.Create)
+			mutating.PATCH("/strategies/:id", strategyH.Update)
+			mutating.DELETE("/strategies/:id", strategyH.Delete)
+			mutating.POST("/strategies/:id/assignments", strategyH.Assign)
+			mutating.DELETE("/strategies/:id/assignments", strategyH.Unassign)
 		}
 	}
 }

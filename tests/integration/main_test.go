@@ -27,6 +27,7 @@ import (
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
+	strategysvc "github.com/Beliashkoff/RepricerX/internal/service/strategy"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-migrate/migrate/v4"
@@ -166,10 +167,16 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	strategySvc := strategysvc.New(
+		repository.NewStrategiesRepository(pool),
+		repository.NewStrategyAssignmentsRepository(pool),
+	)
+
 	transport.RegisterRoutes(r, transport.RouterConfig{
 		AuthSvc:        svc,
 		ShopSvc:        testShopSvc,
 		ProductSvc:     testProductSvc,
+		StrategySvc:    strategySvc,
 		Audit:          audit,
 		AllowedOrigins: []string{testOrigin},
 		TrustProxy:     false,
@@ -184,7 +191,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 func truncate(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(), `
-		TRUNCATE TABLE background_jobs, import_log, integration_log, products, shops, password_reset_tokens, email_verifications, sessions, users
+		TRUNCATE TABLE strategy_assignments, strategies, background_jobs, import_log, integration_log, products, shops, password_reset_tokens, email_verifications, sessions, users
 		RESTART IDENTITY CASCADE
 	`)
 	testShopAuthFail = false

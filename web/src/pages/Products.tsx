@@ -22,7 +22,8 @@ import {
 } from '@/components/ui/select'
 import { productsApi } from '@/api/products'
 import { shopsApi } from '@/api/shops'
-import type { ImportStatus, Product, ProductListParams, ProductSortField, SortDir } from '@/types/api'
+import { strategiesApi } from '@/api/strategies'
+import type { ImportStatus, Product, ProductListParams, ProductSortField, SortDir, Strategy } from '@/types/api'
 import { formatPrice, formatDate } from '@/lib/utils'
 import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X } from 'lucide-react'
 
@@ -377,6 +378,28 @@ export default function Products() {
     onError: () => toast.error('Ошибка архивирования'),
   })
 
+  // ── Assign strategy ──────────────────────────────────────────────────────
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [assignStrategyId, setAssignStrategyId] = useState<string>('')
+
+  const { data: allStrategies = [] } = useQuery({
+    queryKey: ['strategies'],
+    queryFn: strategiesApi.list,
+    enabled: assignOpen,
+  })
+
+  const assignMutation = useMutation({
+    mutationFn: () => strategiesApi.assign(assignStrategyId, Array.from(selectedIds)),
+    onSuccess: () => {
+      toast.success(`Стратегия назначена на ${selectedIds.size} товар${selectedIds.size === 1 ? '' : 'а'}`)
+      setAssignOpen(false)
+      setAssignStrategyId('')
+      setSelectedIds(new Set())
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   const visibleImportId = activeImportId ?? lastImportId
   const importStatus = activeImportId ? importStatusQuery.data : lastImportStatus
   const isImportActive = Boolean(activeImportId && importStatus && activeImportStatuses.includes(importStatus.status))
@@ -507,6 +530,12 @@ export default function Products() {
               disabled={bulkArchiveMutation.isPending}
             >
               Архивировать выбранные
+            </Button>
+            <Button
+              variant="secondary" size="sm"
+              onClick={() => setAssignOpen(true)}
+            >
+              Назначить стратегию
             </Button>
             <button className="text-xs text-[#999] hover:text-[#333] ml-auto"
               onClick={() => setSelectedIds(new Set())}>
@@ -641,6 +670,37 @@ export default function Products() {
       {errorImportId && (
         <ImportErrorsDialog importId={errorImportId} onClose={() => setErrorImportId(null)} />
       )}
+
+      {/* Assign strategy dialog */}
+      <Dialog open={assignOpen} onOpenChange={v => { if (!v) { setAssignOpen(false); setAssignStrategyId('') } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Назначить стратегию</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-[#666]">Выбрано товаров: <strong>{selectedIds.size}</strong></p>
+          <div>
+            <Label>Стратегия</Label>
+            <Select value={assignStrategyId} onValueChange={setAssignStrategyId}>
+              <SelectTrigger className="mt-1.5">
+                <SelectValue placeholder="Выберите стратегию" />
+              </SelectTrigger>
+              <SelectContent>
+                {allStrategies.map((s: Strategy) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} {!s.enabled && '(отключена)'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => { setAssignOpen(false); setAssignStrategyId('') }}>Отмена</Button>
+            <Button disabled={!assignStrategyId || assignMutation.isPending} onClick={() => assignMutation.mutate()}>
+              {assignMutation.isPending ? 'Назначаем...' : 'Назначить'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   )
 }

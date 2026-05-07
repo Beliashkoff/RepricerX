@@ -53,6 +53,7 @@ import (
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
+	strategysvc "github.com/Beliashkoff/RepricerX/internal/service/strategy"
 	transport "github.com/Beliashkoff/RepricerX/internal/transport/http"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -97,6 +98,8 @@ func main() {
 	importLogRepo := repository.NewImportLogRepository(pool)
 	jobsRepo := repository.NewBackgroundJobsRepository(pool)
 	intLogRepo := repository.NewIntegrationLogRepository(pool)
+	strategiesRepo := repository.NewStrategiesRepository(pool)
+	assignmentsRepo := repository.NewStrategyAssignmentsRepository(pool)
 
 	audit := auditlog.New(log)
 
@@ -117,6 +120,8 @@ func main() {
 			return ozon.NewClient(shopID, b, limiter)
 		},
 	})
+	strategyService := strategysvc.New(strategiesRepo, assignmentsRepo)
+
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
 		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
 			return wildberries.NewClient(shopID, b, limiter)
@@ -156,6 +161,7 @@ func main() {
 		AuthSvc:        svc,
 		ShopSvc:        shopService,
 		ProductSvc:     productService,
+		StrategySvc:    strategyService,
 		UsersRepo:      usersRepo,
 		Audit:          audit,
 		AllowedOrigins: cfg.AllowedOrigins,

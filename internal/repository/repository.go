@@ -91,6 +91,47 @@ type IntegrationLogRepository interface {
 	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
+type StrategyCreateInput struct {
+	Name           string
+	Type           string
+	Params         []byte
+	Constraints    []byte
+	FallbackPolicy string
+	Priority       int
+	Enabled        bool
+}
+
+type StrategyUpdateInput struct {
+	Name           *string
+	Type           *string
+	Params         []byte // nil = не менять
+	Constraints    []byte // nil = не менять
+	FallbackPolicy *string
+	Priority       *int
+	Enabled        *bool
+}
+
+type StrategiesRepository interface {
+	ListByUser(ctx context.Context, userID uuid.UUID) ([]*domain.Strategy, error)
+	GetByIDForUser(ctx context.Context, userID, strategyID uuid.UUID) (*domain.Strategy, error)
+	Create(ctx context.Context, userID uuid.UUID, input StrategyCreateInput) (*domain.Strategy, error)
+	Update(ctx context.Context, userID, strategyID uuid.UUID, input StrategyUpdateInput) (*domain.Strategy, error)
+	Delete(ctx context.Context, userID, strategyID uuid.UUID) error
+	CountAssignments(ctx context.Context, strategyID uuid.UUID) (int, error)
+}
+
+type StrategyAssignmentsRepository interface {
+	AssignToProducts(ctx context.Context, userID, strategyID uuid.UUID, productIDs []uuid.UUID) error
+	UnassignFromProducts(ctx context.Context, userID, strategyID uuid.UUID, productIDs []uuid.UUID) error
+	ListProductIDsByStrategy(ctx context.Context, userID, strategyID uuid.UUID) ([]uuid.UUID, error)
+}
+
+type PriceChangesRepository interface {
+	ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*domain.PriceChange, error)
+	SummaryForUser(ctx context.Context, userID uuid.UUID, since time.Time, until time.Time) (*domain.PriceChangeSummary, error)
+	ExportForUser(ctx context.Context, userID uuid.UUID) ([]*domain.PriceChange, error)
+}
+
 type ProductListFilter struct {
 	Query       string
 	ShopID      *uuid.UUID

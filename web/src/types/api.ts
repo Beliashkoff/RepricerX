@@ -138,22 +138,50 @@ export interface ImportErrorsPage {
 // Strategies
 export interface Strategy {
   id: string
-  user_id: string
+  userId: string
   name: string
   type: StrategyType
   params: Record<string, unknown>
   constraints: StrategyConstraints
-  fallback_policy: FallbackPolicy
+  fallbackPolicy: FallbackPolicy
   priority: number
   enabled: boolean
-  created_at: string
+  assignedCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StrategyDetail extends Strategy {
+  assignedProductIds: string[]
 }
 
 export interface StrategyConstraints {
   min_price?: number
   max_price?: number
+  min_profit_pct?: number
+  min_profit_abs?: number
   max_change_pct?: number
   min_interval_minutes?: number
+}
+
+export interface CreateStrategyPayload {
+  name: string
+  type: StrategyType
+  params: Record<string, unknown>
+  constraints?: StrategyConstraints
+  fallbackPolicy: FallbackPolicy
+  priority?: number
+  enabled?: boolean
+}
+
+export interface UpdateStrategyPayload {
+  name?: string
+  type?: StrategyType
+  params?: Record<string, unknown>
+  constraints?: StrategyConstraints
+  fallbackPolicy?: FallbackPolicy
+  priority?: number
+  enabled?: boolean
 }
 
 // Price changes (audit log)
