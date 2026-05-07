@@ -80,8 +80,8 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
       toast.success('Цены обновлены')
       onSaved()
       onClose()
-    } catch {
-      toast.error('Ошибка сохранения цен')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Ошибка сохранения цен')
     } finally {
       setBusy(false)
     }
@@ -94,8 +94,8 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
       toast.success('Товар архивирован')
       onSaved()
       onClose()
-    } catch {
-      toast.error('Ошибка архивирования')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Ошибка архивирования')
     } finally {
       setBusy(false)
     }
