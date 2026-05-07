@@ -26,10 +26,10 @@ export function Hero() {
             и обновлять цены автоматически, пока вы занимаетесь бизнесом.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 mb-10">
-            <Button size="lg" onClick={() => navigate('/sign-up')} className="gap-2">
+            <Button size="lg" onClick={() => navigate('/register')} className="gap-2">
               Начать бесплатно <ArrowRight className="h-4 w-4" />
             </Button>
-            <Button size="lg" variant="secondary" onClick={() => navigate('/sign-in')}>
+            <Button size="lg" variant="secondary" onClick={() => navigate('/login')}>
               Войти в кабинет
             </Button>
           </div>

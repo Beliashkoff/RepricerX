@@ -17,7 +17,7 @@ function CTA() {
         <p className="text-white/60 text-lg mb-8">
           Подключите первый магазин за 2 минуты. Без сложных настроек.
         </p>
-        <Button size="lg" onClick={() => navigate('/sign-up')} className="gap-2">
+        <Button size="lg" onClick={() => navigate('/register')} className="gap-2">
           Начать бесплатно <ArrowRight className="h-4 w-4" />
         </Button>
       </div>
