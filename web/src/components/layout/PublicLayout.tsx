@@ -1,11 +1,30 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/button'
+import { useState } from 'react'
 
 function Logo() {
+  const [logoFailed, setLogoFailed] = useState(false)
+
   return (
-    <Link to="/" className="flex items-center gap-2 font-bold text-xl text-[#111]">
-      <span className="w-8 h-8 rounded-lg bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold text-sm">R</span>
+    <Link
+      to="/"
+      aria-label="RepricerX на главную"
+      className="flex items-center gap-2 font-bold text-xl text-[#111] select-none"
+    >
+      {logoFailed ? (
+        <span className="w-8 h-8 rounded-lg bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold text-sm">
+          R
+        </span>
+      ) : (
+        <img
+          src="/logo.png"
+          alt=""
+          className="w-8 h-8 rounded-lg object-contain pointer-events-none"
+          draggable={false}
+          onError={() => setLogoFailed(true)}
+        />
+      )}
       RepricerX
     </Link>
   )
