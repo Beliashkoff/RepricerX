@@ -10,6 +10,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /api ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /migrate ./cmd/migrate
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /credbackfill ./cmd/credbackfill
 
 FROM alpine:3.21
 
@@ -19,6 +20,7 @@ WORKDIR /app
 
 COPY --from=builder /api /app/api
 COPY --from=builder /migrate /app/migrate
+COPY --from=builder /credbackfill /app/credbackfill
 COPY --from=builder /app/migrations /app/migrations
 
 EXPOSE 8080

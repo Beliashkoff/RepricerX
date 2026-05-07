@@ -1,5 +1,5 @@
 -- Migration 000008: drop legacy marketplace-specific tables.
--- PREREQUISITE: run cmd/credbackfill and verify failed=0 before applying this migration.
+-- PREREQUISITE: run cmd/credbackfill and verify failed=0 before starting API/worker.
 -- All four DROP statements are idempotent (IF EXISTS) so it is safe to apply even if
 -- migration 000003 already dropped them on a previous installation.
 

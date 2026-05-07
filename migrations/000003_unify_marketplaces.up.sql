@@ -333,4 +333,4 @@ FROM competitors_ozon
 ON CONFLICT (id) DO NOTHING;
 
 -- Legacy tables intentionally NOT dropped here.
--- Run cmd/credbackfill to re-encrypt plaintext credentials, then apply migration 000008.
+-- Production deploy runs cmd/credbackfill after migrations and before API/worker startup.

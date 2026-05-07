@@ -86,6 +86,10 @@ jobs:
             docker compose --env-file .env.prod -f docker-compose.prod.yaml rm -f migrate || true
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up --no-build --no-deps --exit-code-from migrate migrate
 
+            echo "==> encrypt legacy shop credentials"
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml rm -f credbackfill || true
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up --no-build --no-deps --exit-code-from credbackfill credbackfill
+
             echo "==> start application"
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d --no-build api worker web nginx
 

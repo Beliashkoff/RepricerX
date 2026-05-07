@@ -67,6 +67,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      credbackfill:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - internal
@@ -86,6 +88,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: "no"
+    networks:
+      - internal
+
+  credbackfill:
+    image: ${API_IMAGE:?API_IMAGE must be set to an immutable image tag}
+    container_name: repricer_credbackfill
+    entrypoint: ["/app/credbackfill"]
+    environment:
+      DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: "no"
     networks:
       - internal
@@ -118,6 +136,8 @@ services:
       redis:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      credbackfill:
         condition: service_completed_successfully
     restart: unless-stopped
     networks:

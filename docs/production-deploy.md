@@ -8,13 +8,14 @@ Runtime containers must not build images on the production host. `docker-compose
 - `WORKER_IMAGE=ghcr.io/<owner>/repricerx/worker:<git-sha>`
 - `WEB_IMAGE=ghcr.io/<owner>/repricerx/web:<git-sha>`
 
-Migrations are a separate one-shot job:
+Migrations and legacy credentials encryption are separate one-shot jobs:
 
 ```sh
 docker compose --env-file .env.prod -f docker-compose.prod.yaml up --no-build --no-deps --exit-code-from migrate migrate
+docker compose --env-file .env.prod -f docker-compose.prod.yaml up --no-build --no-deps --exit-code-from credbackfill credbackfill
 ```
 
-Only after that command exits successfully should `api`, `worker`, `web`, and `nginx` be started. The API binary does not apply migrations on startup.
+Only after both commands exit successfully should `api`, `worker`, `web`, and `nginx` be started. The `credbackfill` job is idempotent: it skips already encrypted shop credentials and encrypts plaintext rows produced by legacy marketplace migrations. The API binary does not apply migrations on startup.
 
 Rollback uses the previous immutable images saved by deploy:
 
