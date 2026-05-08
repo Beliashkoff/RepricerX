@@ -18,9 +18,17 @@ const NAV_ITEMS = [
 
 function Logo() {
   return (
-    <Link to="/dashboard" className="flex items-center gap-2 font-bold text-lg text-[#111]">
-      <span className="w-8 h-8 rounded-lg bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold text-sm">R</span>
-      RepricerX
+    <Link to="/dashboard" className="flex items-center gap-2 font-bold text-2xl text-[#111] select-none">
+      <img
+        src="/logo.png"
+        alt="RepricerX logo"
+        className="w-16 h-16 rounded-lg object-contain pointer-events-none"
+        draggable={false}
+      />
+      <span>
+        Repricer
+        <span className="text-[#f2c200]">X</span>
+      </span>
     </Link>
   )
 }
@@ -80,7 +88,8 @@ function TopBar() {
   const initials = (user?.displayName ?? user?.email ?? '?')[0].toUpperCase()
 
   return (
-    <header className="h-14 bg-white border-b border-[#e6e6e6] flex items-center justify-end px-6 gap-3">
+    <header className="h-14 bg-white border-b border-[#e6e6e6] flex items-center justify-between px-6 gap-3">
+      <Logo />
       <button className="w-9 h-9 rounded-xl bg-[#f5f5f5] flex items-center justify-center text-[#666] hover:bg-[#e8e9eb] transition-colors">
         <Bell className="h-4 w-4" />
       </button>

@@ -7,12 +7,12 @@ function Logo() {
     <Link
       to="/"
       aria-label="RepricerX на главную"
-      className="flex items-center gap-2 font-bold text-xl text-[#111] select-none"
+      className="flex items-center gap-2 font-bold text-2xl text-[#111] select-none"
     >
       <img
         src="/logo.png"
         alt="RepricerX logo"
-        className="w-12 h-12 rounded-lg object-contain pointer-events-none"
+        className="w-16 h-16 rounded-lg object-contain pointer-events-none"
         draggable={false}
       />
       <span>
