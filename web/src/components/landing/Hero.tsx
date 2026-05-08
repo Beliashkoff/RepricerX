@@ -16,13 +16,13 @@ export function Hero() {
         <div>
           <div className="inline-flex items-center gap-2 bg-[#fff9cc] text-[#7a6000] text-xs font-medium px-3 py-1.5 rounded-full mb-6">
             <span className="w-1.5 h-1.5 rounded-full bg-[#ffcc00]" />
-            Wildberries & Ozon — в одном месте
+            Wildberries & Ozon - в одном месте
           </div>
           <h1 className="text-[#111] mb-6">
             Автоматическое управление ценами на маркетплейсах
           </h1>
           <p className="text-lg text-[#555] mb-8 leading-relaxed max-w-lg">
-            Подключите магазин, настройте стратегию — RepricerX будет отслеживать конкурентов
+            Подключите магазин, настройте стратегию - RepricerX будет отслеживать конкурентов
             и обновлять цены автоматически, пока вы занимаетесь бизнесом.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 mb-10">
