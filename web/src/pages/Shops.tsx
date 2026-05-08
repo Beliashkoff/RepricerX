@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AppLayout, PageHeader, EmptyState } from '@/components/layout/AppLayout'
@@ -44,6 +45,7 @@ function CreateShopDialog({ open, onClose }: { open: boolean; onClose: () => voi
   const qc = useQueryClient()
   const [form, setForm] = useState<CreateShopForm>({ name: '', marketplace: 'wb', api_key: '', client_id: '' })
   const [showKey, setShowKey] = useState(false)
+  const [accessConfirmed, setAccessConfirmed] = useState(false)
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => shopsApi.create({
@@ -58,6 +60,7 @@ function CreateShopDialog({ open, onClose }: { open: boolean; onClose: () => voi
       toast.success('Магазин подключён')
       onClose()
       setForm({ name: '', marketplace: 'wb', api_key: '', client_id: '' })
+      setAccessConfirmed(false)
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -109,11 +112,26 @@ function CreateShopDialog({ open, onClose }: { open: boolean; onClose: () => voi
             </div>
             <p className="text-xs text-[#aaa] mt-1">Ключ хранится в зашифрованном виде</p>
           </div>
+          <label className="flex items-start gap-2 text-xs leading-5 text-[#666]">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 rounded border-[#d6d6d6] accent-[#ffcc00]"
+              checked={accessConfirmed}
+              onChange={e => setAccessConfirmed(e.target.checked)}
+            />
+            <span>
+              Подтверждаю, что имею право использовать этот API-ключ и понимаю, что RepricerX может менять цены магазина по выбранным стратегиям.
+              {' '}
+              <Link to="/legal/platform-rules" className="font-medium text-[#111] underline underline-offset-2">
+                Правила платформы
+              </Link>
+            </span>
+          </label>
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" className="flex-1" onClick={onClose}>Отмена</Button>
             <Button
               className="flex-1"
-              disabled={!form.name || !form.api_key || (form.marketplace === 'ozon' && !form.client_id) || isPending}
+              disabled={!form.name || !form.api_key || (form.marketplace === 'ozon' && !form.client_id) || !accessConfirmed || isPending}
               onClick={() => mutate()}
             >
               {isPending ? 'Подключаем...' : 'Подключить'}

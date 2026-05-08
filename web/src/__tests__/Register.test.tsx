@@ -83,6 +83,17 @@ describe('Register — валидация', () => {
     await waitFor(() => screen.getByText(/введите имя/i))
     expect(mockRegister).not.toHaveBeenCalled()
   })
+
+  it('требует обязательное согласие с юридическими документами', async () => {
+    renderRegister()
+    await userEvent.type(screen.getByLabelText(/имя/i), 'Иван')
+    await userEvent.type(screen.getByLabelText(/email/i), 'ivan@example.com')
+    await userEvent.type(screen.getByLabelText(/пароль/i), 'ValidPass1')
+    fireEvent.click(screen.getByRole('button', { name: /Создать аккаунт/i }))
+
+    await waitFor(() => expect(screen.getByText(/подтвердите согласие/i)).toBeInTheDocument())
+    expect(mockRegister).not.toHaveBeenCalled()
+  })
 })
 
 describe('Register — успешная регистрация', () => {
@@ -97,6 +108,7 @@ describe('Register — успешная регистрация', () => {
     await userEvent.type(screen.getByLabelText(/имя/i), 'Иван')
     await userEvent.type(screen.getByLabelText(/email/i), 'ivan@example.com')
     await userEvent.type(screen.getByLabelText(/пароль/i), 'ValidPass1')
+    await userEvent.click(screen.getByRole('checkbox', { name: /я принимаю/i }))
     fireEvent.click(screen.getByRole('button', { name: /Создать аккаунт/i }))
 
     await waitFor(() => expect(mockRegister).toHaveBeenCalledWith('ivan@example.com', 'ValidPass1', 'Иван'))
@@ -118,6 +130,7 @@ describe('Register — ошибка регистрации', () => {
     await userEvent.type(screen.getByLabelText(/имя/i), 'Иван')
     await userEvent.type(screen.getByLabelText(/email/i), 'ivan@example.com')
     await userEvent.type(screen.getByLabelText(/пароль/i), 'ValidPass1')
+    await userEvent.click(screen.getByRole('checkbox', { name: /я принимаю/i }))
     fireEvent.click(screen.getByRole('button', { name: /Создать аккаунт/i }))
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('email_taken'))

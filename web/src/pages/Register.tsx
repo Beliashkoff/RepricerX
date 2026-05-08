@@ -43,8 +43,10 @@ export default function Register() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
+  const [legalAccepted, setLegalAccepted] = useState(false)
+  const [marketingAccepted, setMarketingAccepted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [errors, setErrors] = useState<{ displayName?: string; email?: string; password?: string }>({})
+  const [errors, setErrors] = useState<{ displayName?: string; email?: string; password?: string; legal?: string }>({})
   const [registeredEmail, setRegisteredEmail] = useState<string | null>(null)
   const [resending, setResending] = useState(false)
   const [recentlySent, setRecentlySent] = useState(false)
@@ -58,6 +60,7 @@ export default function Register() {
     else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'Некорректный email'
     if (!password) e.password = 'Введите пароль'
     else if (password.length < 8) e.password = 'Минимум 8 символов'
+    if (!legalAccepted) e.legal = 'Подтвердите согласие с юридическими документами'
     return e
   }
 
@@ -211,6 +214,38 @@ export default function Register() {
                 </button>
               </div>
               {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password}</p>}
+            </div>
+
+            <div className="flex flex-col gap-3 text-xs text-[#666]">
+              <label className="flex items-start gap-2 leading-5">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-[#d6d6d6] accent-[#ffcc00]"
+                  checked={legalAccepted}
+                  onChange={e => setLegalAccepted(e.target.checked)}
+                />
+                <span>
+                  Я принимаю{' '}
+                  <Link to="/legal/terms" className="font-medium text-[#111] underline underline-offset-2">оферту</Link>
+                  ,{' '}
+                  <Link to="/legal/platform-rules" className="font-medium text-[#111] underline underline-offset-2">правила платформы</Link>
+                  ,{' '}
+                  <Link to="/legal/privacy" className="font-medium text-[#111] underline underline-offset-2">политику ПДн</Link>
+                  {' '}и даю{' '}
+                  <Link to="/legal/personal-data-consent" className="font-medium text-[#111] underline underline-offset-2">согласие на обработку персональных данных</Link>.
+                </span>
+              </label>
+              {errors.legal && <p className="text-xs text-red-500">{errors.legal}</p>}
+
+              <label className="flex items-start gap-2 leading-5">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-[#d6d6d6] accent-[#ffcc00]"
+                  checked={marketingAccepted}
+                  onChange={e => setMarketingAccepted(e.target.checked)}
+                />
+                <span>Хочу получать продуктовые новости и маркетинговые материалы. Сервисные письма по аккаунту будут приходить независимо от этого согласия.</span>
+              </label>
             </div>
 
             <Button type="submit" className="w-full mt-1" disabled={submitting}>

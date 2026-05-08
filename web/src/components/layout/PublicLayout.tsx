@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/button'
+import { useEffect, useState } from 'react'
 
 function Logo() {
   return (
@@ -51,6 +52,45 @@ export function PublicHeader() {
   )
 }
 
+const cookieConsentKey = 'repricerx_cookie_consent_v1'
+
+function CookieBanner() {
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    setVisible(localStorage.getItem(cookieConsentKey) === null)
+  }, [])
+
+  function accept(value: 'necessary' | 'all') {
+    localStorage.setItem(cookieConsentKey, value)
+    setVisible(false)
+  }
+
+  if (!visible) return null
+
+  return (
+    <div className="fixed left-4 right-4 bottom-4 z-50 mx-auto max-w-3xl rounded-2xl border border-[#e6e6e6] bg-white p-4 shadow-lg">
+      <div className="flex flex-col md:flex-row gap-4 md:items-center md:justify-between">
+        <p className="text-sm text-[#555] leading-6">
+          RepricerX использует необходимые cookies для входа и безопасности. Аналитические и маркетинговые cookies включаются только после согласия.
+          {' '}
+          <Link to="/legal/cookies" className="font-medium text-[#111] underline underline-offset-2">
+            Подробнее
+          </Link>
+        </p>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="secondary" size="sm" onClick={() => accept('necessary')}>
+            Только необходимые
+          </Button>
+          <Button size="sm" onClick={() => accept('all')}>
+            Принять все
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-white">
@@ -64,7 +104,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               Автоматическое управление ценами на Wildberries и Ozon
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-8 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 text-sm">
             <div>
               <p className="font-medium text-[#111] mb-3">Продукт</p>
               <div className="flex flex-col gap-2 text-[#666]">
@@ -80,12 +120,22 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                 <Link to="/register" className="hover:text-[#111]">Регистрация</Link>
               </div>
             </div>
+            <div>
+              <p className="font-medium text-[#111] mb-3">Документы</p>
+              <div className="flex flex-col gap-2 text-[#666]">
+                <Link to="/legal/terms" className="hover:text-[#111]">Оферта</Link>
+                <Link to="/legal/privacy" className="hover:text-[#111]">Персональные данные</Link>
+                <Link to="/legal/cookies" className="hover:text-[#111]">Cookies</Link>
+                <Link to="/legal/archive" className="hover:text-[#111]">Архив</Link>
+              </div>
+            </div>
           </div>
         </div>
         <div className="max-w-6xl mx-auto px-6 mt-8 pt-8 border-t border-[#e6e6e6] text-sm text-[#666]">
           © 2026 RepricerX. Учебный проект НИУ ВШЭ.
         </div>
       </footer>
+      <CookieBanner />
     </div>
   )
 }
