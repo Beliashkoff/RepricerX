@@ -132,7 +132,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="max-w-6xl mx-auto px-6 mt-8 pt-8 border-t border-[#e6e6e6] text-sm text-[#666]">
-          © 2026 RepricerX. Учебный проект НИУ ВШЭ.
+          © 2026 RepricerX.
         </div>
       </footer>
       <CookieBanner />
