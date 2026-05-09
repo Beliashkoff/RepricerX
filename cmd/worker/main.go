@@ -19,6 +19,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
+	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
 	dispatchersvc "github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
@@ -104,15 +105,19 @@ func main() {
 		pricingsvc.WithDispatcher(dispatcherService),
 	)
 
+	// Этап 7: competitor refresh handler. competitor.Service использует ozon-lookup
+	// (или другой источник) для обновления цен конкурентов.
+	competitorService := competitorsvc.New(competitorsRepo, nil)
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	log.Info("worker started", "worker_id", workerID, "concurrency", cfg.WorkerConcurrency)
-	run(ctx, log, workerID, cfg, jobsRepo, productService, pricingService, dispatcherService)
+	run(ctx, log, workerID, cfg, jobsRepo, productService, pricingService, dispatcherService, competitorService)
 	log.Info("worker stopped", "worker_id", workerID)
 }
 
-func run(ctx context.Context, log *slog.Logger, workerID string, cfg *config.Config, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, pricingService *pricingsvc.Service, dispatcherService *dispatchersvc.Service) {
+func run(ctx context.Context, log *slog.Logger, workerID string, cfg *config.Config, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, pricingService *pricingsvc.Service, dispatcherService *dispatchersvc.Service, competitorService *competitorsvc.Service) {
 	sem := make(chan struct{}, cfg.WorkerConcurrency)
 	var wg sync.WaitGroup
 
@@ -148,12 +153,12 @@ func run(ctx context.Context, log *slog.Logger, workerID string, cfg *config.Con
 		go func(job *domain.BackgroundJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			processJob(log, jobs, productService, pricingService, dispatcherService, job, cfg.WorkerJobTimeout)
+			processJob(log, jobs, productService, pricingService, dispatcherService, competitorService, job, cfg.WorkerJobTimeout)
 		}(job)
 	}
 }
 
-func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, pricingService *pricingsvc.Service, dispatcherService *dispatchersvc.Service, job *domain.BackgroundJob, timeout time.Duration) {
+func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, pricingService *pricingsvc.Service, dispatcherService *dispatchersvc.Service, competitorService *competitorsvc.Service, job *domain.BackgroundJob, timeout time.Duration) {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -167,6 +172,10 @@ func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, prod
 	}
 	if job.JobType == domain.BackgroundJobTypePriceDispatch {
 		processDispatchJob(log, jobs, dispatcherService, job, started)
+		return
+	}
+	if job.JobType == domain.BackgroundJobTypeCompetitorRefresh {
+		processCompetitorRefreshJob(log, jobs, competitorService, job, started)
 		return
 	}
 
@@ -273,6 +282,49 @@ func processDispatchJob(log *slog.Logger, jobs repository.BackgroundJobsReposito
 		return
 	}
 	log.Info("dispatch job applied",
+		"job_id", job.ID, "duration_ms", time.Since(started).Milliseconds())
+}
+
+// processCompetitorRefreshJob — Этап 7. Обработчик BackgroundJobTypeCompetitorRefresh.
+// Контракт: ErrCompetitorNotFound → Fail (no retry); ErrRefreshFailed → Retry с backoff;
+// max_attempts → Fail без retry.
+func processCompetitorRefreshJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, cs *competitorsvc.Service, job *domain.BackgroundJob, started time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	err := cs.RefreshFromJob(ctx, job)
+	if err == nil {
+		if serr := jobs.Succeed(context.Background(), job.ID, nil); serr != nil {
+			log.Error("competitor refresh succeed save", "job_id", job.ID, "error", serr)
+			return
+		}
+		log.Info("competitor refresh applied",
+			"job_id", job.ID, "duration_ms", time.Since(started).Milliseconds())
+		return
+	}
+
+	// CompetitorNotFound — терминально (запись удалили между enqueue и claim).
+	if errors.Is(err, competitorsvc.ErrCompetitorNotFound) {
+		_ = jobs.Fail(context.Background(), job.ID, err.Error(), nil)
+		log.Warn("competitor refresh not_found", "job_id", job.ID, "error", err)
+		return
+	}
+
+	// Все остальные ошибки (ErrRefreshFailed, network) — retryable.
+	if job.Attempts < job.MaxAttempts {
+		runAt := time.Now().UTC().Add(backoff(job.Attempts))
+		if rerr := jobs.Retry(context.Background(), job.ID, runAt, err.Error()); rerr != nil {
+			log.Error("competitor refresh retry save", "job_id", job.ID, "error", rerr)
+			return
+		}
+		log.Warn("competitor refresh retry scheduled",
+			"job_id", job.ID, "run_at", runAt, "attempts", job.Attempts, "error", err)
+		return
+	}
+	if ferr := jobs.Fail(context.Background(), job.ID, err.Error(), nil); ferr != nil {
+		log.Error("competitor refresh fail save", "job_id", job.ID, "error", ferr)
+	}
+	log.Warn("competitor refresh exhausted",
 		"job_id", job.ID, "duration_ms", time.Since(started).Milliseconds())
 }
 

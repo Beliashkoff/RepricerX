@@ -26,6 +26,7 @@ type shopResponse struct {
 	AutoUpdateEnabled bool       `json:"autoUpdateEnabled" example:"false"`
 	ScheduleCron      string     `json:"scheduleCron"      example:"0 */4 * * *"`
 	LastCheckedAt     *time.Time `json:"lastCheckedAt"`
+	LastRecalcAt      *time.Time `json:"lastRecalcAt"` // Этап 7
 	CreatedAt         time.Time  `json:"createdAt"`
 }
 

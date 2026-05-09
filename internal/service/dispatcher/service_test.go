@@ -197,6 +197,10 @@ func (r *fakeShopsRepo) Delete(_ context.Context, _, _ uuid.UUID) error         
 func (r *fakeShopsRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ string, _ time.Time) error {
 	return nil
 }
+func (r *fakeShopsRepo) ListSchedulable(_ context.Context) ([]*domain.Shop, error) { return nil, nil }
+func (r *fakeShopsRepo) TouchLastRecalcAt(_ context.Context, _ uuid.UUID, _ *time.Time) (bool, error) {
+	return true, nil
+}
 
 type fakeJobsRepo struct {
 	enqueued []repository.BackgroundJobEnqueue

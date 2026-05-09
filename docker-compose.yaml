@@ -93,6 +93,23 @@ services:
     networks:
       - repricer-net
 
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/scheduler.Dockerfile
+    container_name: repricer_scheduler
+    environment:
+      DATABASE_URL: postgres://admin:secret@db:5432/repricer_db?sslmode=disable
+      REDIS_ADDR: redis:6379
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-only-change-me-32-bytes-minimum}
+      ENVIRONMENT: ${ENVIRONMENT:-dev}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - repricer-net
+
   web:
     image: node:22-alpine
     container_name: repricer_web

@@ -216,45 +216,8 @@ func main() {
 		RateLimiter:    httpLimiter,
 	})
 
-	// Cleanup горутина: каждый час удаляем протухшие сессии и одноразовые токены.
-	// Этап 7: переедет в robfig/cron v3.
-	go func() {
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			n, err := sessionsRepo.DeleteExpired(context.Background())
-			if err != nil {
-				log.Error("cleanup: expired sessions", "error", err)
-			} else if n > 0 {
-				log.Info("cleanup: удалены сессии", "count", n)
-			}
-			n, err = verRepo.DeleteExpired(context.Background())
-			if err != nil {
-				log.Error("cleanup: expired verifications", "error", err)
-			} else if n > 0 {
-				log.Info("cleanup: удалены токены верификации", "count", n)
-			}
-			n, err = resetRepo.DeleteExpired(context.Background())
-			if err != nil {
-				log.Error("cleanup: expired password resets", "error", err)
-			} else if n > 0 {
-				log.Info("cleanup: удалены токены сброса пароля", "count", n)
-			}
-			n, err = intLogRepo.DeleteOlderThan(context.Background(), time.Now().UTC().Add(-30*24*time.Hour))
-			if err != nil {
-				log.Error("cleanup: integration_log", "error", err)
-			} else if n > 0 {
-				log.Info("cleanup: удалены записи integration_log", "count", n)
-			}
-			// Этап 6: retention 180 дней для price_change_log (ТЗ 4.1.1.8.2).
-			n, err = priceChangesRepo.DeleteOlderThan(context.Background(), time.Now().UTC().Add(-180*24*time.Hour))
-			if err != nil {
-				log.Error("cleanup: price_change_log", "error", err)
-			} else if n > 0 {
-				log.Info("cleanup: удалены записи price_change_log", "count", n)
-			}
-		}
-	}()
+	// Этап 7: cleanup переехал в cmd/scheduler (robfig/cron, тик "0 * * * *").
+	// API больше не запускает cleanup-горутину.
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,

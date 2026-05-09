@@ -27,6 +27,7 @@ export interface Shop {
   marketplace: Marketplace
   status: ShopStatus
   lastCheckedAt: string | null
+  lastRecalcAt: string | null  // Этап 7: момент последнего scheduled/manual recalc
   createdAt: string
   autoUpdateEnabled: boolean
   scheduleCron: string

@@ -111,6 +111,12 @@ jobs:
             .
 
           docker buildx build --push \
+            -f docker/scheduler.Dockerfile \
+            -t "${image_ns}/scheduler:${GITHUB_SHA}" \
+            -t "${image_ns}/scheduler:main" \
+            .
+
+          docker buildx build --push \
             -f docker/web.Dockerfile \
             --build-arg VITE_CLERK_PUBLISHABLE_KEY="${VITE_CLERK_PUBLISHABLE_KEY}" \
             -t "${image_ns}/web:${GITHUB_SHA}" \

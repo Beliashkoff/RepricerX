@@ -178,11 +178,15 @@ func (r *fakeShopsRepo) Delete(_ context.Context, id, _ uuid.UUID) error {
 	delete(r.shops, id)
 	return nil
 }
-func (r *fakeShopsRepo) UpdateStatus(_ context.Context, id uuid.UUID, status string, t time.Time) error {
+func (r *fakeShopsRepo) UpdateStatus(_ context.Context, id uuid.UUID, status string, _ time.Time) error {
 	if s, ok := r.shops[id]; ok {
 		s.Status = status
 	}
 	return nil
+}
+func (r *fakeShopsRepo) ListSchedulable(_ context.Context) ([]*domain.Shop, error) { return nil, nil }
+func (r *fakeShopsRepo) TouchLastRecalcAt(_ context.Context, _ uuid.UUID, _ *time.Time) (bool, error) {
+	return true, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

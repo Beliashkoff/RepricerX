@@ -144,6 +144,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.POST("/pricing/recalculate", pricingH.Recalculate)
 			mutating.POST("/price-plans/:id/dispatch", pricingH.Dispatch)
 			mutating.POST("/price-plans/:id/cancel", pricingH.CancelPlan)
+			mutating.POST("/shops/:id/run-now", pricingH.RunNow)
 		}
 	}
 }

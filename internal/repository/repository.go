@@ -82,6 +82,16 @@ type ShopsRepository interface {
 	// Delete удаляет магазин только если он принадлежит userID.
 	Delete(ctx context.Context, id, userID uuid.UUID) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string, checkedAt time.Time) error
+	// ListSchedulable возвращает все active shops с непустым schedule_cron.
+	// Используется scheduler-ом для итерации в cron-tick (Этап 7).
+	// БЕЗ фильтра по auto_update_enabled — флаги независимы.
+	ListSchedulable(ctx context.Context) ([]*domain.Shop, error)
+	// TouchLastRecalcAt атомарно обновляет shops.last_recalc_at = NOW()
+	// только если текущее значение равно expectedPrev (CAS-условие).
+	// Возвращает (true, nil) если переход применился; (false, nil) если другая
+	// реплика уже забрала. Защищает scheduledRecalc от двойного запуска
+	// в multi-replica развёртывании.
+	TouchLastRecalcAt(ctx context.Context, shopID uuid.UUID, expectedPrev *time.Time) (bool, error)
 }
 
 // IntegrationLogRepository — операции с таблицей integration_log.
@@ -221,6 +231,12 @@ type CompetitorCheckResult struct {
 	CheckedAt    time.Time
 }
 
+// StaleCompetitor — view-структура для scheduler-tick (Этап 7).
+type StaleCompetitor struct {
+	CompetitorID uuid.UUID
+	UserID       uuid.UUID
+}
+
 type ProductCompetitorsRepository interface {
 	Create(ctx context.Context, userID uuid.UUID, input CompetitorCreateInput) (*domain.ProductCompetitor, error)
 	ListByProduct(ctx context.Context, userID, productID uuid.UUID) ([]*domain.ProductCompetitor, error)
@@ -229,6 +245,10 @@ type ProductCompetitorsRepository interface {
 	Delete(ctx context.Context, userID, competitorID uuid.UUID) error
 	SaveCheckResult(ctx context.Context, competitorID uuid.UUID, result CompetitorCheckResult) (*domain.ProductCompetitor, error)
 	LatestFreshPrice(ctx context.Context, userID, productID uuid.UUID, maxAge time.Duration) (*float64, error)
+	// ListStaleForRefresh — для scheduler competitorRefreshTick (Этап 7).
+	// Возвращает competitor_id + user_id (через JOIN products + shops) для всех
+	// конкурентов с last_checked_at < since (или NULL) и активным статусом.
+	ListStaleForRefresh(ctx context.Context, since time.Time, limit int) ([]StaleCompetitor, error)
 }
 
 type ProductListFilter struct {

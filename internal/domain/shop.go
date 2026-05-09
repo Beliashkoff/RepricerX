@@ -16,8 +16,13 @@ type Shop struct {
 	AutoUpdateEnabled    bool
 	ScheduleCron         string
 	LastCheckedAt        *time.Time
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// LastRecalcAt — момент последнего scheduled recalc (Этап 7).
+	// Используется scheduler-ом как baseline для cron.Next() и как expectedPrev
+	// в CAS-update для защиты от двойного запуска между replicas.
+	// nil если магазин ещё не запускался по расписанию.
+	LastRecalcAt *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 const (

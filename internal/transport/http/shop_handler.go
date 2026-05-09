@@ -225,6 +225,7 @@ func toShopResponse(s *domain.Shop) shopResponse {
 		AutoUpdateEnabled: s.AutoUpdateEnabled,
 		ScheduleCron:      s.ScheduleCron,
 		LastCheckedAt:     s.LastCheckedAt,
+		LastRecalcAt:      s.LastRecalcAt,
 		CreatedAt:         s.CreatedAt,
 	}
 }

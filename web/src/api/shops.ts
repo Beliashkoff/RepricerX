@@ -30,4 +30,10 @@ export const shopsApi = {
     const { data } = await apiClient.post(`/shops/${id}/test`)
     return data
   },
+
+  // Этап 7: ручной запуск пересчёта цен магазина (вне расписания cron).
+  runNow: async (id: string): Promise<{ plan_id: string; job_id: string }> => {
+    const { data } = await apiClient.post(`/shops/${id}/run-now`)
+    return data
+  },
 }

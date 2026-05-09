@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AppLayout, PageHeader, EmptyState } from '@/components/layout/AppLayout'
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { shopsApi } from '@/api/shops'
 import type { Shop, Marketplace } from '@/types/api'
-import { Plus, Trash2, RefreshCw, Clock, Eye, EyeOff, Pencil, Zap } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Clock, Eye, EyeOff, Pencil, Zap, Play, History } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
 function ShopStatusBadge({ status }: { status: Shop['status'] }) {
@@ -220,7 +220,7 @@ function EditShopDialog({ shop, onClose }: { shop: Shop; onClose: () => void }) 
               Пример: <code className="bg-[#f5f5f5] px-1 rounded">0 3 * * *</code> = каждый день в 3:00 UTC.
               {!cronValid && <span className="text-red-500 ml-2">Неверный формат cron.</span>}
               <br />
-              <span className="text-[#aaa]">Расписание вступит в силу с Этапом 7 (cron-планировщик).</span>
+              <span className="text-[#aaa]">Расписание активно. Отдельный сервис cmd/scheduler проверяет каждую минуту и запускает пересчёт когда расписание сработало.</span>
             </p>
           </div>
 
@@ -247,6 +247,7 @@ export default function Shops() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [editingShop, setEditingShop] = useState<Shop | null>(null)
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   const { data: shops = [], isLoading } = useQuery({ queryKey: ['shops'], queryFn: shopsApi.list })
 
@@ -265,6 +266,17 @@ export default function Shops() {
       qc.invalidateQueries({ queryKey: ['shops'] })
       toast.success('Магазин удалён')
       setDeletingId(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  // Этап 7: ручной триггер пересчёта.
+  const runNowMutation = useMutation({
+    mutationFn: (id: string) => shopsApi.runNow(id),
+    onSuccess: (data) => {
+      toast.success('Пересчёт запущен')
+      qc.invalidateQueries({ queryKey: ['shops'] })
+      navigate(`/price-plans/${data.plan_id}`)
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -304,6 +316,10 @@ export default function Shops() {
                   Проверено: {formatDate(shop.lastCheckedAt)}
                 </p>
               )}
+              <p className="text-xs text-[#aaa] flex items-center gap-1.5">
+                <History className="h-3 w-3" />
+                Последний пересчёт: {shop.lastRecalcAt ? formatDate(shop.lastRecalcAt) : '—'}
+              </p>
               {shop.autoUpdateEnabled && (
                 <p className="text-xs text-[#7a6000] flex items-center gap-1.5">
                   <Zap className="h-3 w-3 text-[#ffcc00]" />
@@ -312,14 +328,24 @@ export default function Shops() {
               )}
               <div className="flex gap-2 pt-1">
                 <Button
-                  variant="secondary"
+                  variant="default"
                   size="sm"
                   className="flex-1 gap-1.5"
+                  disabled={runNowMutation.isPending}
+                  onClick={() => runNowMutation.mutate(shop.id)}
+                  title="Запустить пересчёт цен сейчас"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {runNowMutation.isPending ? 'Запускаем…' : 'Запустить'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon"
                   disabled={testMutation.isPending}
                   onClick={() => testMutation.mutate(shop.id)}
+                  title="Проверить подключение к маркетплейсу"
                 >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Проверить
+                  <RefreshCw className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="secondary"
@@ -333,6 +359,7 @@ export default function Shops() {
                   variant="destructive"
                   size="icon"
                   onClick={() => setDeletingId(shop.id)}
+                  title="Удалить"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>

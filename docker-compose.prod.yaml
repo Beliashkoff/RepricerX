@@ -143,6 +143,22 @@ services:
     networks:
       - internal
 
+  scheduler:
+    image: ${SCHEDULER_IMAGE:?SCHEDULER_IMAGE must be set to an immutable image tag}
+    container_name: repricer_scheduler
+    environment:
+      DATABASE_URL: postgres://repricer:${DB_PASSWORD}@db:5432/repricer_db?sslmode=disable
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENVIRONMENT: prod
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - internal
+
   web:
     image: ${WEB_IMAGE:?WEB_IMAGE must be set to an immutable image tag}
     container_name: repricer_web

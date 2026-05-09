@@ -159,6 +159,33 @@ func toPlanResponse(p *domain.PricePlan) pricePlanResponse {
 	}
 }
 
+// RunNow — Этап 7. Ручной триггер пересчёта всех товаров магазина.
+// Создаёт recalculate-job (как обычный Recalculate без productIDs).
+//
+//	@Summary	Запустить пересчёт цен магазина сейчас
+//	@Tags		shops
+//	@Param		id	path	string	true	"shop ID (UUID)"
+//	@Success	202	{object}	map[string]any
+//	@Router		/api/shops/{id}/run-now [post]
+//	@Security	SessionCookie
+func (h *pricingHandler) RunNow(c *gin.Context) {
+	user := mustUser(c)
+	shopID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "invalid_id", "Неверный формат id")
+		return
+	}
+	plan, job, err := h.svc.Recalculate(c.Request.Context(), user.ID, shopID, nil)
+	if err != nil {
+		handlePricingErr(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"plan_id": plan.ID.String(),
+		"job_id":  job.ID.String(),
+	})
+}
+
 // Dispatch — manual trigger отправки рассчитанного плана в МП.
 //
 //	@Summary	Запустить отправку плана в маркетплейс

@@ -211,6 +211,39 @@ func (r *productCompetitorsPg) LatestFreshPrice(ctx context.Context, userID, pro
 	return &price, nil
 }
 
+// ListStaleForRefresh — Этап 7. Для competitorRefreshTick.
+// Возвращает competitor_id + user_id (через JOIN) для записей с устаревшими
+// или отсутствующими last_checked_at. Только активные статусы (pending/ok/rate_limited)
+// — не трогаем уже failed/disabled/blocked.
+func (r *productCompetitorsPg) ListStaleForRefresh(ctx context.Context, since time.Time, limit int) ([]StaleCompetitor, error) {
+	if limit <= 0 || limit > 10000 {
+		limit = 1000
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT pc.id, s.user_id
+		FROM product_competitors pc
+		JOIN products p ON p.id = pc.product_id
+		JOIN shops s ON s.id = p.shop_id
+		WHERE (pc.last_checked_at IS NULL OR pc.last_checked_at < $1)
+		  AND pc.last_status IN ('pending', 'ok', 'rate_limited')
+		ORDER BY pc.last_checked_at NULLS FIRST, pc.id
+		LIMIT $2`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []StaleCompetitor
+	for rows.Next() {
+		var s StaleCompetitor
+		if err := rows.Scan(&s.CompetitorID, &s.UserID); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 func scanProductCompetitor(row scannable) (*domain.ProductCompetitor, error) {
 	var item domain.ProductCompetitor
 	if err := row.Scan(

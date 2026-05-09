@@ -31,7 +31,7 @@ func (r *shopsPg) GetByID(ctx context.Context, id, userID uuid.UUID) (*domain.Sh
 	row := r.db.QueryRow(ctx, `
 		SELECT id, user_id, marketplace, name, credentials_encrypted,
 		       status, auto_update_enabled, schedule_cron,
-		       last_checked_at, created_at, updated_at
+		       last_checked_at, last_recalc_at, created_at, updated_at
 		FROM shops
 		WHERE id=$1 AND user_id=$2`, id, userID)
 	return scanShop(row)
@@ -41,7 +41,7 @@ func (r *shopsPg) ListByUserID(ctx context.Context, userID uuid.UUID) ([]*domain
 	rows, err := r.db.Query(ctx, `
 		SELECT id, user_id, marketplace, name, credentials_encrypted,
 		       status, auto_update_enabled, schedule_cron,
-		       last_checked_at, created_at, updated_at
+		       last_checked_at, last_recalc_at, created_at, updated_at
 		FROM shops
 		WHERE user_id=$1
 		ORDER BY created_at ASC`, userID)
@@ -105,7 +105,7 @@ func scanShop(row scannable) (*domain.Shop, error) {
 	err := row.Scan(
 		&s.ID, &s.UserID, &s.Marketplace, &s.Name, &s.CredentialsEncrypted,
 		&s.Status, &s.AutoUpdateEnabled, &s.ScheduleCron,
-		&s.LastCheckedAt, &s.CreatedAt, &s.UpdatedAt,
+		&s.LastCheckedAt, &s.LastRecalcAt, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -114,4 +114,48 @@ func scanShop(row scannable) (*domain.Shop, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// ListSchedulable возвращает active shops с непустым schedule_cron.
+// Используется в scheduledRecalcTick (Этап 7). Без фильтра по auto_update_enabled —
+// флаги независимы.
+func (r *shopsPg) ListSchedulable(ctx context.Context) ([]*domain.Shop, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, user_id, marketplace, name, credentials_encrypted,
+		       status, auto_update_enabled, schedule_cron,
+		       last_checked_at, last_recalc_at, created_at, updated_at
+		FROM shops
+		WHERE status = 'active' AND schedule_cron IS NOT NULL AND schedule_cron != ''
+		ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shops []*domain.Shop
+	for rows.Next() {
+		shop, err := scanShop(rows)
+		if err != nil {
+			return nil, err
+		}
+		shops = append(shops, shop)
+	}
+	return shops, rows.Err()
+}
+
+// TouchLastRecalcAt атомарно обновляет shops.last_recalc_at = NOW() с CAS-условием
+// на expectedPrev. Защищает от двойного запуска scheduledRecalc между replicas.
+func (r *shopsPg) TouchLastRecalcAt(ctx context.Context, shopID uuid.UUID, expectedPrev *time.Time) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE shops
+		SET last_recalc_at = NOW(), updated_at = NOW()
+		WHERE id = $1
+		  AND (
+		    ($2::timestamp IS NULL AND last_recalc_at IS NULL)
+		    OR (last_recalc_at = $2)
+		  )`, shopID, expectedPrev)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
 }

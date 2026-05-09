@@ -2,6 +2,7 @@ package competitor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -128,6 +129,20 @@ func (s *Service) Delete(ctx context.Context, userID, competitorID uuid.UUID) er
 	}
 	if err != nil {
 		return fmt.Errorf("competitor delete: %w", err)
+	}
+	return nil
+}
+
+// RefreshFromJob — Этап 7. Обработчик для worker switch на BackgroundJobTypeCompetitorRefresh.
+// Парсит payload и делегирует в Refresh. ErrRefreshFailed → retryable error для worker;
+// ErrCompetitorNotFound → терминальная ошибка (не retry-ить).
+func (s *Service) RefreshFromJob(ctx context.Context, job *domain.BackgroundJob) error {
+	var payload domain.CompetitorRefreshJobPayload
+	if err := json.Unmarshal(job.Payload, &payload); err != nil {
+		return fmt.Errorf("competitor refresh: parse payload: %w", err)
+	}
+	if _, err := s.Refresh(ctx, payload.UserID, payload.CompetitorID); err != nil {
+		return err
 	}
 	return nil
 }
