@@ -17,6 +17,40 @@ func NewPriceChangesRepository(db *pgxpool.Pool) PriceChangesRepository {
 	return &priceChangesPg{db: db}
 }
 
+func (r *priceChangesPg) Create(ctx context.Context, c PriceChangeCreate) error {
+	// Маппим item.status (plan_item_status) → price_change_log.status (тоже plan_item_status):
+	// 'dispatched' → 'applied' (исторический статус для read-API)
+	// 'failed'/'skipped' остаются как есть.
+	dbStatus := c.Status
+	if dbStatus == domain.PlanItemStatusDispatched {
+		dbStatus = domain.PlanItemStatusApplied
+	}
+
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO price_change_log (
+			shop_id, product_id, strategy_id,
+			old_price, new_price, target_price,
+			reason, constraint_hit, status, correlation_id
+		) VALUES (
+			$1, $2, $3,
+			$4, $5, $6,
+			$7, $8, $9::plan_item_status, $10
+		)`,
+		c.ShopID, c.ProductID, c.StrategyID,
+		c.OldPrice, c.NewPrice, c.TargetPrice,
+		c.Reason, c.ConstraintHit, dbStatus, c.CorrelationID,
+	)
+	return err
+}
+
+func (r *priceChangesPg) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.db.Exec(ctx, `DELETE FROM price_change_log WHERE created_at < $1`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *priceChangesPg) ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*domain.PriceChange, error) {
 	if limit < 1 || limit > 500 {
 		limit = 200

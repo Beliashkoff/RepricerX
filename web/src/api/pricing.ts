@@ -25,10 +25,20 @@ export interface RecalculateRequest {
   product_ids?: string[]
 }
 
+export type PricePlanStatus =
+  | 'pending'
+  | 'processing'
+  | 'calculated'
+  | 'dispatching'
+  | 'applied'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+
 export interface PricePlanSummary {
   id: string
   shop_id: string
-  status: 'pending' | 'processing' | 'applied' | 'failed' | 'cancelled'
+  status: PricePlanStatus
   total: number
   created_at: string
   updated_at: string
@@ -39,6 +49,8 @@ export interface RecalculateResponse {
   job_id: string
 }
 
+export type PricePlanItemStatus = 'pending' | 'applied' | 'dispatched' | 'skipped' | 'failed'
+
 export interface PricePlanItem {
   id: string
   product_id: string
@@ -48,7 +60,7 @@ export interface PricePlanItem {
   target_price: number
   final_price: number
   constraint_hit: string
-  status: 'pending' | 'applied' | 'skipped' | 'failed'
+  status: PricePlanItemStatus
   error?: string
 }
 
@@ -83,5 +95,16 @@ export const pricingApi = {
   getPlan: async (id: string): Promise<PricePlanDetail> => {
     const { data } = await apiClient.get<PricePlanDetail>(`/price-plans/${id}`)
     return data
+  },
+
+  // Этап 6: manual dispatch уже рассчитанного плана в МП.
+  dispatch: async (planID: string): Promise<{ job_id: string; plan_id: string }> => {
+    const { data } = await apiClient.post(`/price-plans/${planID}/dispatch`)
+    return data
+  },
+
+  // Этап 6: отмена плана в non-terminal статусе.
+  cancelPlan: async (planID: string): Promise<void> => {
+    await apiClient.post(`/price-plans/${planID}/cancel`)
   },
 }

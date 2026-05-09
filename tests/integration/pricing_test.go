@@ -287,15 +287,15 @@ func TestPricing_ExecuteRecalcJob_AppliesItemsAndStatus(t *testing.T) {
 		t.Fatalf("ExecuteRecalcJob: %v", err)
 	}
 
-	// 3. Проверяем что план переведён в applied.
+	// 3. Проверяем что план переведён в calculated (расчёт окончен; dispatch — Этап 6).
 	var status string
 	if err := testPool.QueryRow(context.Background(),
 		"SELECT status::text FROM price_plans WHERE id=$1", plan.ID,
 	).Scan(&status); err != nil {
 		t.Fatalf("plan status: %v", err)
 	}
-	if status != domain.PlanStatusApplied {
-		t.Errorf("plan status=%s, want applied", status)
+	if status != domain.PlanStatusCalculated {
+		t.Errorf("plan status=%s, want calculated", status)
 	}
 
 	// 4. Проверяем что есть item с правильной final_price.
@@ -507,11 +507,11 @@ func TestPricing_ExecuteRecalcJob_NoStrategyProductSkipped(t *testing.T) {
 		t.Errorf("expected 0 items (no strategy), got %d", count)
 	}
 
-	// Plan всё равно должен стать applied.
+	// Plan всё равно должен стать calculated (нет items для отправки).
 	var status string
 	_ = testPool.QueryRow(context.Background(), "SELECT status::text FROM price_plans WHERE id=$1", plan.ID).Scan(&status)
-	if status != domain.PlanStatusApplied {
-		t.Errorf("plan status=%s, want applied", status)
+	if status != domain.PlanStatusCalculated {
+		t.Errorf("plan status=%s, want calculated", status)
 	}
 }
 
@@ -594,13 +594,13 @@ func TestPricing_PriceSync(t *testing.T) {
 		t.Errorf("expected current_price=1234.56 after sync, got %v", newPrice)
 	}
 
-	// План должен быть applied.
+	// План должен быть calculated (Этап 6 не вызывался).
 	var planStatus string
 	_ = testPool.QueryRow(context.Background(),
 		"SELECT status::text FROM price_plans WHERE id=$1", plan.ID,
 	).Scan(&planStatus)
-	if planStatus != domain.PlanStatusApplied {
-		t.Errorf("plan status=%s, want applied", planStatus)
+	if planStatus != domain.PlanStatusCalculated {
+		t.Errorf("plan status=%s, want calculated", planStatus)
 	}
 }
 

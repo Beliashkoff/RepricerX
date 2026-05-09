@@ -9,6 +9,7 @@ import (
 	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
+	"github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -27,6 +28,7 @@ type RouterConfig struct {
 	CompetitorSvc  *competitorsvc.Service
 	StrategySvc    *strategysvc.Service
 	PricingSvc     *pricingsvc.Service
+	DispatcherSvc  *dispatcher.Service
 	AuditSvc       *auditsvc.Service
 	UsersRepo      repository.UsersRepository
 	Audit          *auditlog.Logger
@@ -55,7 +57,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	productH := NewProductHandler(cfg.ProductSvc)
 	competitorH := NewCompetitorHandler(cfg.CompetitorSvc)
 	strategyH := NewStrategyHandler(cfg.StrategySvc)
-	pricingH := NewPricingHandler(cfg.PricingSvc)
+	pricingH := NewPricingHandler(cfg.PricingSvc, cfg.DispatcherSvc)
 	auditH := NewAuditHandler(cfg.AuditSvc)
 
 	// Swagger UI: /swagger/index.html
@@ -140,6 +142,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.DELETE("/strategies/:id/assignments", strategyH.Unassign)
 			mutating.POST("/pricing/simulate", pricingH.Simulate)
 			mutating.POST("/pricing/recalculate", pricingH.Recalculate)
+			mutating.POST("/price-plans/:id/dispatch", pricingH.Dispatch)
+			mutating.POST("/price-plans/:id/cancel", pricingH.CancelPlan)
 		}
 	}
 }

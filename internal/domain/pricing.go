@@ -11,16 +11,20 @@ const (
 	PriceChangeStatusFailed  = "failed"
 	PriceChangeStatusSkipped = "skipped"
 
-	PlanStatusPending    = "pending"
-	PlanStatusProcessing = "processing"
-	PlanStatusApplied    = "applied"
-	PlanStatusFailed     = "failed"
-	PlanStatusCancelled  = "cancelled"
+	PlanStatusPending     = "pending"
+	PlanStatusProcessing  = "processing"
+	PlanStatusCalculated  = "calculated"  // расчёт завершён, ждёт отправки (Этап 6)
+	PlanStatusDispatching = "dispatching" // идёт отправка в МП (Этап 6)
+	PlanStatusApplied     = "applied"     // отправка завершена успешно
+	PlanStatusPartial     = "partial"     // часть отправлена, часть с ошибкой (Этап 6)
+	PlanStatusFailed      = "failed"
+	PlanStatusCancelled   = "cancelled"
 
-	PlanItemStatusPending = "pending"
-	PlanItemStatusApplied = "applied"
-	PlanItemStatusSkipped = "skipped"
-	PlanItemStatusFailed  = "failed"
+	PlanItemStatusPending    = "pending"
+	PlanItemStatusApplied    = "applied"    // legacy: использовалось в Этапе 5 как "рассчитан"
+	PlanItemStatusDispatched = "dispatched" // цена отправлена в МП и принята (Этап 6)
+	PlanItemStatusSkipped    = "skipped"
+	PlanItemStatusFailed     = "failed"
 
 	ConstraintMinPrice       = "min_price"
 	ConstraintMaxPrice       = "max_price"
@@ -35,13 +39,24 @@ const (
 	ReasonFallbackSetMin      = "fallback_set_min"
 	ReasonUnsupportedCurrency = "unsupported_currency"
 	ReasonInvalidCurrent      = "invalid_current_price"
-	ReasonProductArchived     = "product_archived"
-	ReasonStrategyDisabled    = "strategy_disabled"
+	ReasonProductArchived       = "product_archived"
+	ReasonStrategyDisabled      = "strategy_disabled"
 	ReasonMinIntervalNotElapsed = "min_interval_not_elapsed"
+
+	// Reasons для Этапа 6 (отправка)
+	ReasonDispatchUnauthorized     = "marketplace_unauthorized"
+	ReasonDispatchRateLimited      = "marketplace_rate_limited"
+	ReasonDispatchRetriesExhausted = "dispatch_retries_exhausted"
+	ReasonDispatchNetworkError     = "marketplace_network_error"
+	ReasonDispatchPartialReject    = "marketplace_partial_reject"
 
 	ConstraintMinInterval = "min_interval_minutes"
 
 	BackgroundJobTypePriceRecalculation = "price_recalculation"
+	BackgroundJobTypePriceDispatch      = "price_dispatch"
+
+	// Operations для integration_log (вызовы маркетплейса при dispatch)
+	IntegrationOpPriceDispatch = "price_dispatch"
 )
 
 type PriceChange struct {
@@ -100,4 +115,11 @@ type PriceRecalculationJobPayload struct {
 	ShopID            uuid.UUID   `json:"shop_id"`
 	ProductIDs        []uuid.UUID `json:"product_ids,omitempty"`
 	RequestedByUserID uuid.UUID   `json:"requested_by_user_id"`
+}
+
+// PriceDispatchJobPayload — задача отправки уже рассчитанного плана в МП.
+type PriceDispatchJobPayload struct {
+	PlanID            uuid.UUID `json:"plan_id"`
+	ShopID            uuid.UUID `json:"shop_id"`
+	RequestedByUserID uuid.UUID `json:"requested_by_user_id"`
 }

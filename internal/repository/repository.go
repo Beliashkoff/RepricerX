@@ -130,6 +130,25 @@ type PriceChangesRepository interface {
 	ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*domain.PriceChange, error)
 	SummaryForUser(ctx context.Context, userID uuid.UUID, since time.Time, until time.Time) (*domain.PriceChangeSummary, error)
 	ExportForUser(ctx context.Context, userID uuid.UUID) ([]*domain.PriceChange, error)
+	// Create — пишет одну запись в price_change_log при отправке/skip/fail (Этап 6).
+	Create(ctx context.Context, change PriceChangeCreate) error
+	// DeleteOlderThan — retention 180 дней. Возвращает кол-во удалённых строк.
+	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+// PriceChangeCreate — параметры записи в price_change_log.
+// status принимает значения plan_item_status: 'applied' / 'failed' / 'skipped'.
+type PriceChangeCreate struct {
+	ShopID        uuid.UUID
+	ProductID     uuid.UUID
+	StrategyID    *uuid.UUID
+	OldPrice      float64
+	NewPrice      float64
+	TargetPrice   float64
+	Reason        string
+	ConstraintHit string
+	Status        string
+	CorrelationID uuid.UUID
 }
 
 // PricePlansRepository — план изменений цен (Этап 5).
@@ -147,6 +166,33 @@ type PricePlansRepository interface {
 	// Используется для проверки constraint min_interval_minutes.
 	// Возвращает (nil, nil) если истории нет.
 	LatestItemCreatedAt(ctx context.Context, productID uuid.UUID) (*time.Time, error)
+
+	// ListItemsForDispatch возвращает items со status='pending' и связанным external_sku
+	// продукта — для отправки в МП. Используется dispatcher worker.
+	ListItemsForDispatch(ctx context.Context, planID uuid.UUID) ([]*PricePlanItemForDispatch, error)
+	// UpdateItemAfterDispatch — обновляет статус и текст ошибки item-а после реальной отправки.
+	UpdateItemAfterDispatch(ctx context.Context, itemID uuid.UUID, status, errorText string) error
+	// CountItemsByStatus — для финализации статуса плана (applied/partial/failed).
+	CountItemsByStatus(ctx context.Context, planID uuid.UUID) (map[string]int, error)
+	// ResolveOwnerAndShop возвращает (userID, shopID) для plan по его id.
+	ResolveOwnerAndShop(ctx context.Context, planID uuid.UUID) (userID, shopID uuid.UUID, err error)
+	// TransitionStatus атомарно меняет статус с fromStatus на toStatus.
+	// Возвращает (true,nil) если переход применился, (false,nil) если статус был не fromStatus
+	// (например, план уже отменён или уже dispatching). При ErrNoRows → (false, ErrNotFound).
+	TransitionStatus(ctx context.Context, planID uuid.UUID, fromStatus, toStatus string) (bool, error)
+}
+
+// PricePlanItemForDispatch — view-структура с полями, нужными для UpdatePrices.
+type PricePlanItemForDispatch struct {
+	ItemID        uuid.UUID
+	ProductID     uuid.UUID
+	ExternalSKU   string
+	StrategyID    *uuid.UUID
+	CurrentPrice  float64
+	FinalPrice    float64
+	TargetPrice   float64
+	ConstraintHit string
+	CorrelationID uuid.UUID
 }
 
 type CompetitorCreateInput struct {

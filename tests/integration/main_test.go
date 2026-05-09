@@ -28,6 +28,7 @@ import (
 	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
 	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
+	dispatchersvc "github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -59,13 +60,21 @@ var (
 	testMailer     *capturingMailer
 	testShopSvc    *shopsvc.Service
 	testProductSvc *productsvc.Service
-	testPricingSvc *pricingsvc.Service
+	testPricingSvc    *pricingsvc.Service
+	testDispatcherSvc *dispatchersvc.Service
 	// allowAuthFail управляет тем, вернёт ли fakeMarketplace ошибку auth.
 	testShopAuthFail        bool
 	testSKUs                []integration.SKU
 	testListSKUsErr         error
 	testCompetitorPrice     *float64
 	testCompetitorLookupErr error
+
+	// Dispatch-test hooks: программируемое поведение UpdatePrices.
+	// updatePricesResults — FIFO список ошибок для последовательных вызовов.
+	// nil = success. Если список исчерпан — возвращается nil.
+	testUpdatePricesMu      sync.Mutex
+	testUpdatePricesResults []error
+	testUpdatePricesCalls   []integration.PriceUpdate
 )
 
 // fakeMarketplace — заглушка адаптера маркетплейса для интеграционных тестов.
@@ -85,7 +94,15 @@ func (f *fakeMarketplace) ListSKUs(_ context.Context) ([]integration.SKU, error)
 	copy(out, testSKUs)
 	return out, nil
 }
-func (f *fakeMarketplace) UpdatePrices(_ context.Context, _ []integration.PriceUpdate) error {
+func (f *fakeMarketplace) UpdatePrices(_ context.Context, ups []integration.PriceUpdate) error {
+	testUpdatePricesMu.Lock()
+	defer testUpdatePricesMu.Unlock()
+	testUpdatePricesCalls = append(testUpdatePricesCalls, ups...)
+	if len(testUpdatePricesResults) > 0 {
+		err := testUpdatePricesResults[0]
+		testUpdatePricesResults = testUpdatePricesResults[1:]
+		return err
+	}
 	return nil
 }
 
@@ -191,6 +208,22 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 		repository.NewStrategiesRepository(pool),
 		repository.NewStrategyAssignmentsRepository(pool),
 	)
+	// Этап 6: dispatcher с fakeMarketplace.
+	dispatcherSvc := dispatchersvc.New(
+		repository.NewPricePlansRepository(pool),
+		repository.NewProductsRepository(pool),
+		repository.NewPriceChangesRepository(pool),
+		repository.NewIntegrationLogRepository(pool),
+		repository.NewShopsRepository(pool),
+		repository.NewBackgroundJobsRepository(pool),
+		testShopSecret,
+		map[string]dispatchersvc.MarketplaceFactory{
+			"wb":   func(_ string, _ []byte) (integration.Marketplace, error) { return &fakeMarketplace{}, nil },
+			"ozon": func(_ string, _ []byte) (integration.Marketplace, error) { return &fakeMarketplace{}, nil },
+		},
+	)
+	testDispatcherSvc = dispatcherSvc
+
 	pricingSvc := pricingsvc.New(
 		repository.NewProductsRepository(pool),
 		repository.NewStrategiesRepository(pool),
@@ -199,6 +232,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 		pricingsvc.WithJobs(repository.NewBackgroundJobsRepository(pool)),
 		pricingsvc.WithShops(repository.NewShopsRepository(pool)),
 		pricingsvc.WithAssignments(repository.NewStrategyAssignmentsRepository(pool)),
+		pricingsvc.WithDispatcher(dispatcherSvc),
 	)
 	testPricingSvc = pricingSvc
 	competitorSvc := competitorsvc.New(repository.NewProductCompetitorsRepository(pool), fakeOzonCompetitorLookup{})
@@ -211,6 +245,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 		CompetitorSvc:  competitorSvc,
 		StrategySvc:    strategySvc,
 		PricingSvc:     pricingSvc,
+		DispatcherSvc:  dispatcherSvc,
 		AuditSvc:       auditSvc,
 		Audit:          audit,
 		AllowedOrigins: []string{testOrigin},
@@ -234,6 +269,10 @@ func truncate(t *testing.T) {
 	testListSKUsErr = nil
 	testCompetitorPrice = nil
 	testCompetitorLookupErr = nil
+	testUpdatePricesMu.Lock()
+	testUpdatePricesResults = nil
+	testUpdatePricesCalls = nil
+	testUpdatePricesMu.Unlock()
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
 	}

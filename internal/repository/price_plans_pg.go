@@ -130,6 +130,103 @@ func (r *pricePlansPg) UpdateStatus(ctx context.Context, planID uuid.UUID, statu
 	return nil
 }
 
+func (r *pricePlansPg) ListItemsForDispatch(ctx context.Context, planID uuid.UUID) ([]*PricePlanItemForDispatch, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			ppi.id, ppi.product_id, p.external_sku, ppi.strategy_id,
+			ppi.current_price::float8, ppi.final_price::float8, ppi.target_price::float8,
+			ppi.constraint_hit, ppi.correlation_id
+		FROM price_plan_items ppi
+		JOIN products p ON p.id = ppi.product_id
+		WHERE ppi.plan_id = $1
+		  AND ppi.status = 'pending'::plan_item_status
+		ORDER BY ppi.created_at`, planID)
+	if err != nil {
+		return nil, fmt.Errorf("list items for dispatch: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*PricePlanItemForDispatch
+	for rows.Next() {
+		var it PricePlanItemForDispatch
+		if err := rows.Scan(
+			&it.ItemID, &it.ProductID, &it.ExternalSKU, &it.StrategyID,
+			&it.CurrentPrice, &it.FinalPrice, &it.TargetPrice,
+			&it.ConstraintHit, &it.CorrelationID,
+		); err != nil {
+			return nil, fmt.Errorf("scan item for dispatch: %w", err)
+		}
+		out = append(out, &it)
+	}
+	return out, rows.Err()
+}
+
+func (r *pricePlansPg) UpdateItemAfterDispatch(ctx context.Context, itemID uuid.UUID, status, errorText string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE price_plan_items
+		SET status = $2::plan_item_status,
+		    error  = $3,
+		    updated_at = NOW()
+		WHERE id = $1`, itemID, status, errorText)
+	if err != nil {
+		return fmt.Errorf("update item after dispatch: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *pricePlansPg) CountItemsByStatus(ctx context.Context, planID uuid.UUID) (map[string]int, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT status::text, COUNT(*)::int FROM price_plan_items WHERE plan_id=$1 GROUP BY status`,
+		planID)
+	if err != nil {
+		return nil, fmt.Errorf("count items by status: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var n int
+		if err := rows.Scan(&status, &n); err != nil {
+			return nil, err
+		}
+		out[status] = n
+	}
+	return out, rows.Err()
+}
+
+func (r *pricePlansPg) ResolveOwnerAndShop(ctx context.Context, planID uuid.UUID) (uuid.UUID, uuid.UUID, error) {
+	var userID, shopID uuid.UUID
+	err := r.db.QueryRow(ctx, `
+		SELECT s.user_id, pp.shop_id
+		FROM price_plans pp
+		JOIN shops s ON s.id = pp.shop_id
+		WHERE pp.id = $1`, planID,
+	).Scan(&userID, &shopID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("resolve owner: %w", err)
+	}
+	return userID, shopID, nil
+}
+
+func (r *pricePlansPg) TransitionStatus(ctx context.Context, planID uuid.UUID, fromStatus, toStatus string) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE price_plans
+		SET status = $3::plan_status, updated_at = NOW()
+		WHERE id = $1 AND status = $2::plan_status`,
+		planID, fromStatus, toStatus)
+	if err != nil {
+		return false, fmt.Errorf("transition status: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 func (r *pricePlansPg) LatestItemCreatedAt(ctx context.Context, productID uuid.UUID) (*time.Time, error) {
 	var t time.Time
 	err := r.db.QueryRow(ctx, `

@@ -1,19 +1,27 @@
+import { useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { AppLayout, PageHeader, EmptyState } from '@/components/layout/AppLayout'
 import { Button } from '@/components/ui/button'
 import { pricingApi, type PricePlanSummary, type PricePlanItem } from '@/api/pricing'
 import { formatPrice, formatDate } from '@/lib/utils'
-import { ArrowLeft, ListChecks, Loader2, CheckCircle2, AlertTriangle, Ban } from 'lucide-react'
+import { ArrowLeft, ListChecks, Loader2, CheckCircle2, AlertTriangle, Ban, Send, X } from 'lucide-react'
+
+const TERMINAL_STATUSES = new Set(['applied', 'partial', 'failed', 'cancelled'])
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
-    pending:    { label: 'Ожидание',     cls: 'bg-gray-100 text-gray-700',     icon: <Loader2 className="h-3 w-3 animate-spin" /> },
-    processing: { label: 'Обработка',    cls: 'bg-blue-100 text-blue-700',     icon: <Loader2 className="h-3 w-3 animate-spin" /> },
-    applied:    { label: 'Готово',       cls: 'bg-green-100 text-green-700',   icon: <CheckCircle2 className="h-3 w-3" /> },
-    failed:     { label: 'Ошибка',       cls: 'bg-red-100 text-red-700',       icon: <AlertTriangle className="h-3 w-3" /> },
-    cancelled:  { label: 'Отменён',      cls: 'bg-gray-100 text-gray-500',     icon: <Ban className="h-3 w-3" /> },
-    skipped:    { label: 'Пропущен',     cls: 'bg-orange-100 text-orange-700', icon: <AlertTriangle className="h-3 w-3" /> },
+    pending:     { label: 'Ожидание',    cls: 'bg-gray-100 text-gray-700',     icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+    processing:  { label: 'Обработка',   cls: 'bg-blue-100 text-blue-700',     icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+    calculated:  { label: 'Рассчитан',   cls: 'bg-cyan-100 text-cyan-700',     icon: <CheckCircle2 className="h-3 w-3" /> },
+    dispatching: { label: 'Отправка',    cls: 'bg-blue-100 text-blue-700',     icon: <Loader2 className="h-3 w-3 animate-spin" /> },
+    applied:     { label: 'Применено',   cls: 'bg-green-100 text-green-700',   icon: <CheckCircle2 className="h-3 w-3" /> },
+    partial:     { label: 'Частично',    cls: 'bg-yellow-100 text-yellow-700', icon: <AlertTriangle className="h-3 w-3" /> },
+    failed:      { label: 'Ошибка',      cls: 'bg-red-100 text-red-700',       icon: <AlertTriangle className="h-3 w-3" /> },
+    cancelled:   { label: 'Отменён',     cls: 'bg-gray-100 text-gray-500',     icon: <Ban className="h-3 w-3" /> },
+    dispatched:  { label: 'Отправлено',  cls: 'bg-green-100 text-green-700',   icon: <CheckCircle2 className="h-3 w-3" /> },
+    skipped:     { label: 'Пропущен',    cls: 'bg-orange-100 text-orange-700', icon: <AlertTriangle className="h-3 w-3" /> },
   }
   const info = map[status] || { label: status, cls: 'bg-gray-100 text-gray-700', icon: null }
   return (
@@ -90,6 +98,7 @@ export function PricePlansList() {
 export function PricePlanDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
     queryKey: ['price-plan', id],
@@ -97,10 +106,47 @@ export function PricePlanDetail() {
     enabled: !!id,
     refetchInterval: (q) => {
       const s = q.state.data?.plan.status
-      if (s === 'applied' || s === 'failed' || s === 'cancelled') return false
+      if (s && TERMINAL_STATUSES.has(s)) return false
       return 2000
     },
   })
+
+  // Toast при смене статуса (для polling Этапа 6).
+  const prevStatusRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const status = data?.plan.status
+    const prev = prevStatusRef.current
+    prevStatusRef.current = status
+    if (!prev || !status || prev === status) return
+    if (prev === 'dispatching') {
+      const dispatched = data?.items.filter((it) => it.status === 'dispatched').length ?? 0
+      const total = data?.items.length ?? 0
+      if (status === 'applied') toast.success(`План применён: ${dispatched} из ${total} цен отправлено`)
+      else if (status === 'partial') toast.warning(`Частично применено: ${dispatched} из ${total}`)
+      else if (status === 'failed') toast.error('Ошибка отправки в маркетплейс')
+    }
+  }, [data])
+
+  const dispatchMutation = useMutation({
+    mutationFn: () => pricingApi.dispatch(id!),
+    onSuccess: () => {
+      toast.success('Отправка в маркетплейс начата')
+      qc.invalidateQueries({ queryKey: ['price-plan', id] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const cancelMutation = useMutation({
+    mutationFn: () => pricingApi.cancelPlan(id!),
+    onSuccess: () => {
+      toast.success('План отменён')
+      qc.invalidateQueries({ queryKey: ['price-plan', id] })
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const status = data?.plan.status ?? ''
+  const canDispatch = status === 'calculated'
+  const canCancel = !TERMINAL_STATUSES.has(status) && status !== ''
 
   return (
     <AppLayout>
@@ -123,11 +169,48 @@ export function PricePlanDetail() {
                 </h2>
                 <p className="text-xs text-[#888] mt-1">Создан {formatDate(data.plan.created_at)}</p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <StatusBadge status={data.plan.status} />
                 <span className="text-sm text-[#666]">{data.plan.total} позиций</span>
+                {canCancel && (
+                  <Button
+                    variant="ghost" size="sm"
+                    onClick={() => cancelMutation.mutate()}
+                    disabled={cancelMutation.isPending}
+                    className="gap-1.5 text-red-600 hover:bg-red-50"
+                  >
+                    <X className="h-4 w-4" />
+                    Отменить
+                  </Button>
+                )}
+                {canDispatch && (
+                  <Button
+                    onClick={() => dispatchMutation.mutate()}
+                    disabled={dispatchMutation.isPending}
+                    className="gap-1.5"
+                  >
+                    <Send className="h-4 w-4" />
+                    {dispatchMutation.isPending ? 'Запускаем…' : 'Отправить в маркетплейс'}
+                  </Button>
+                )}
               </div>
             </div>
+            {status === 'calculated' && (
+              <div className="mt-4 bg-cyan-50 border border-cyan-200 rounded-xl p-3 text-xs text-cyan-700">
+                Цены рассчитаны и ждут отправки в маркетплейс. Включите автоотправку
+                в настройках магазина или нажмите «Отправить» вручную.
+              </div>
+            )}
+            {status === 'partial' && (
+              <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800">
+                Часть цен отправлена успешно, часть — с ошибкой. Подробности — в колонке «Статус» по каждому товару.
+              </div>
+            )}
+            {status === 'failed' && (
+              <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3 text-xs text-red-700">
+                Ошибка отправки. Проверьте credentials магазина и попробуйте создать план заново.
+              </div>
+            )}
           </div>
 
           {data.items.length === 0 && data.plan.status === 'applied' ? (

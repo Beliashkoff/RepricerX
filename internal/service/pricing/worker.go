@@ -64,8 +64,21 @@ func (s *Service) ExecuteRecalcJob(ctx context.Context, job *domain.BackgroundJo
 		return fmt.Errorf("recalc worker: insert items: %w", err)
 	}
 
-	if err := s.plans.UpdateStatus(ctx, payload.PlanID, domain.PlanStatusApplied); err != nil {
-		return fmt.Errorf("recalc worker: mark applied: %w", err)
+	// Этап 6: расчёт окончен, но цены ещё не отправлены — статус "calculated".
+	if err := s.plans.UpdateStatus(ctx, payload.PlanID, domain.PlanStatusCalculated); err != nil {
+		return fmt.Errorf("recalc worker: mark calculated: %w", err)
+	}
+
+	// Auto-dispatch hook (Этап 6): если у магазина включён auto_update_enabled —
+	// сразу enqueue dispatch-job. Best-effort: ошибки логируем, не падаем.
+	if s.dispatcher != nil && s.shops != nil {
+		shop, err := s.shops.GetByID(ctx, payload.ShopID, payload.RequestedByUserID)
+		if err == nil && shop.AutoUpdateEnabled {
+			if _, err := s.dispatcher.EnqueueDispatch(ctx, payload.RequestedByUserID, payload.PlanID); err != nil {
+				slog.Default().Warn("pricing: auto-dispatch enqueue failed",
+					"plan_id", payload.PlanID, "shop_id", payload.ShopID, "error", err)
+			}
+		}
 	}
 	return nil
 }

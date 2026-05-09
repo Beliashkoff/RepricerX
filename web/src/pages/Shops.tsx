@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { shopsApi } from '@/api/shops'
 import type { Shop, Marketplace } from '@/types/api'
-import { Plus, Trash2, RefreshCw, Clock, Eye, EyeOff } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Clock, Eye, EyeOff, Pencil, Zap } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
 function ShopStatusBadge({ status }: { status: Shop['status'] }) {
@@ -143,9 +143,109 @@ function CreateShopDialog({ open, onClose }: { open: boolean; onClose: () => voi
   )
 }
 
+// CRON_RE — простая проверка формата cron (5 полей через пробел, классические символы).
+// Не поддерживает имена дней/месяцев и шаги вне стандартного формата —
+// этого достаточно для UI-валидации.
+const CRON_RE = /^([\*\/0-9,\-]+)(\s+[\*\/0-9,\-]+){4}$/
+
+function EditShopDialog({ shop, onClose }: { shop: Shop; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState(shop.name)
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(shop.autoUpdateEnabled)
+  const [scheduleCron, setScheduleCron] = useState(shop.scheduleCron)
+  const cronValid = CRON_RE.test(scheduleCron.trim())
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () =>
+      shopsApi.update(shop.id, {
+        name,
+        autoUpdateEnabled,
+        scheduleCron: scheduleCron.trim(),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['shops'] })
+      toast.success('Настройки магазина сохранены')
+      onClose()
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Редактирование магазина</DialogTitle>
+          <DialogDescription>Название, автоотправка цен и расписание</DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-4">
+          <div>
+            <Label htmlFor="edit-shop-name">Название</Label>
+            <Input
+              id="edit-shop-name"
+              className="mt-1.5"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+
+          <label className="flex items-start gap-3 p-3 rounded-xl border border-[#e6e6e6] cursor-pointer hover:bg-[#fafafa]">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 rounded border-[#e6e6e6] accent-[#ffcc00]"
+              checked={autoUpdateEnabled}
+              onChange={(e) => setAutoUpdateEnabled(e.target.checked)}
+            />
+            <div>
+              <div className="flex items-center gap-1.5 text-sm font-medium text-[#111]">
+                <Zap className="h-3.5 w-3.5 text-[#ffcc00]" />
+                Автоматическая отправка цен
+              </div>
+              <p className="text-xs text-[#666] mt-1">
+                Если включено — после расчёта плана цены сразу отправляются
+                в маркетплейс. Иначе план остаётся в статусе «calculated» и ждёт ручной отправки.
+              </p>
+            </div>
+          </label>
+
+          <div>
+            <Label htmlFor="edit-shop-cron">Расписание автопересчёта (cron, UTC)</Label>
+            <Input
+              id="edit-shop-cron"
+              className={`mt-1.5 ${!cronValid ? 'border-red-300' : ''}`}
+              value={scheduleCron}
+              onChange={(e) => setScheduleCron(e.target.value)}
+              placeholder="0 3 * * *"
+            />
+            <p className="text-xs text-[#888] mt-1">
+              Пример: <code className="bg-[#f5f5f5] px-1 rounded">0 3 * * *</code> = каждый день в 3:00 UTC.
+              {!cronValid && <span className="text-red-500 ml-2">Неверный формат cron.</span>}
+              <br />
+              <span className="text-[#aaa]">Расписание вступит в силу с Этапом 7 (cron-планировщик).</span>
+            </p>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button variant="secondary" className="flex-1" onClick={onClose}>
+              Отмена
+            </Button>
+            <Button
+              className="flex-1"
+              disabled={!name.trim() || !cronValid || isPending}
+              onClick={() => mutate()}
+            >
+              {isPending ? 'Сохраняем...' : 'Сохранить'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export default function Shops() {
   const [createOpen, setCreateOpen] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [editingShop, setEditingShop] = useState<Shop | null>(null)
   const qc = useQueryClient()
 
   const { data: shops = [], isLoading } = useQuery({ queryKey: ['shops'], queryFn: shopsApi.list })
@@ -204,6 +304,12 @@ export default function Shops() {
                   Проверено: {formatDate(shop.lastCheckedAt)}
                 </p>
               )}
+              {shop.autoUpdateEnabled && (
+                <p className="text-xs text-[#7a6000] flex items-center gap-1.5">
+                  <Zap className="h-3 w-3 text-[#ffcc00]" />
+                  Автоматическая отправка цен включена
+                </p>
+              )}
               <div className="flex gap-2 pt-1">
                 <Button
                   variant="secondary"
@@ -214,6 +320,14 @@ export default function Shops() {
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   Проверить
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  onClick={() => setEditingShop(shop)}
+                  title="Редактировать"
+                >
+                  <Pencil className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="destructive"
@@ -229,6 +343,9 @@ export default function Shops() {
       )}
 
       <CreateShopDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {editingShop && (
+        <EditShopDialog shop={editingShop} onClose={() => setEditingShop(null)} />
+      )}
 
       {/* Delete confirmation */}
       <Dialog open={!!deletingId} onOpenChange={v => !v && setDeletingId(null)}>

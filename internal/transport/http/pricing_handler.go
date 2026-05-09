@@ -6,17 +6,19 @@ import (
 	"strconv"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
+	"github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 type pricingHandler struct {
-	svc *pricingsvc.Service
+	svc        *pricingsvc.Service
+	dispatcher *dispatcher.Service
 }
 
-func NewPricingHandler(svc *pricingsvc.Service) *pricingHandler {
-	return &pricingHandler{svc: svc}
+func NewPricingHandler(svc *pricingsvc.Service, ds *dispatcher.Service) *pricingHandler {
+	return &pricingHandler{svc: svc, dispatcher: ds}
 }
 
 func (h *pricingHandler) Simulate(c *gin.Context) {
@@ -154,6 +156,79 @@ func toPlanResponse(p *domain.PricePlan) pricePlanResponse {
 		Total:     p.Total,
 		CreatedAt: p.CreatedAt,
 		UpdatedAt: p.UpdatedAt,
+	}
+}
+
+// Dispatch — manual trigger отправки рассчитанного плана в МП.
+//
+//	@Summary	Запустить отправку плана в маркетплейс
+//	@Tags		pricing
+//	@Param		id	path	string	true	"plan ID (UUID)"
+//	@Success	202	{object}	map[string]any
+//	@Router		/api/price-plans/{id}/dispatch [post]
+//	@Security	SessionCookie
+func (h *pricingHandler) Dispatch(c *gin.Context) {
+	user := mustUser(c)
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "invalid_id", "Неверный формат id")
+		return
+	}
+	if h.dispatcher == nil {
+		errResp(c, http.StatusServiceUnavailable, "dispatcher_unavailable", "Сервис отправки не настроен")
+		return
+	}
+	job, err := h.dispatcher.EnqueueDispatch(c.Request.Context(), user.ID, planID)
+	if err != nil {
+		handleDispatcherErr(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id":  job.ID.String(),
+		"plan_id": planID.String(),
+	})
+}
+
+// CancelPlan — отменяет план в non-terminal статусе.
+//
+//	@Summary	Отменить план
+//	@Tags		pricing
+//	@Param		id	path	string	true	"plan ID (UUID)"
+//	@Success	204
+//	@Router		/api/price-plans/{id}/cancel [post]
+//	@Security	SessionCookie
+func (h *pricingHandler) CancelPlan(c *gin.Context) {
+	user := mustUser(c)
+	planID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		errResp(c, http.StatusBadRequest, "invalid_id", "Неверный формат id")
+		return
+	}
+	if h.dispatcher == nil {
+		errResp(c, http.StatusServiceUnavailable, "dispatcher_unavailable", "Сервис отправки не настроен")
+		return
+	}
+	if err := h.dispatcher.Cancel(c.Request.Context(), user.ID, planID); err != nil {
+		handleDispatcherErr(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func handleDispatcherErr(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, dispatcher.ErrPlanNotFound):
+		errResp(c, http.StatusNotFound, "plan_not_found", "План не найден")
+	case errors.Is(err, dispatcher.ErrPlanNotReady):
+		errResp(c, http.StatusConflict, "plan_not_ready", "План ещё не рассчитан или уже отправляется")
+	case errors.Is(err, dispatcher.ErrPlanTerminal):
+		errResp(c, http.StatusConflict, "plan_terminal", "План уже в финальном статусе")
+	case errors.Is(err, dispatcher.ErrShopNotFound):
+		errResp(c, http.StatusNotFound, "shop_not_found", "Магазин не найден")
+	case errors.Is(err, dispatcher.ErrUnauthorized):
+		errResp(c, http.StatusUnprocessableEntity, "marketplace_unauthorized", "Маркетплейс отверг credentials")
+	default:
+		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
 	}
 }
 

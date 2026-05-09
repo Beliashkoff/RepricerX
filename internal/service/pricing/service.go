@@ -50,6 +50,13 @@ type SimulateResult struct {
 	CompetitorSource string
 }
 
+// DispatcherTrigger — минимальный интерфейс для auto-dispatch hook (Этап 6).
+// Реализуется dispatcher.Service.EnqueueDispatch. Здесь интерфейс — чтобы
+// pricing не зависел от dispatcher на уровне типов (избегаем перекрёстного импорта).
+type DispatcherTrigger interface {
+	EnqueueDispatch(ctx context.Context, userID, planID uuid.UUID) (*domain.BackgroundJob, error)
+}
+
 type Service struct {
 	products         repository.ProductsRepository
 	strategies       repository.StrategiesRepository
@@ -58,6 +65,7 @@ type Service struct {
 	jobs             repository.BackgroundJobsRepository
 	shops            repository.ShopsRepository
 	assignments      repository.StrategyAssignmentsRepository
+	dispatcher       DispatcherTrigger
 	competitorMaxAge time.Duration
 	priceMaxAge      time.Duration // sync через ListSKUs если old; 0 = sync выключен
 	secret           string        // для расшифровки credentials_encrypted
@@ -84,6 +92,13 @@ func WithShops(shops repository.ShopsRepository) Option {
 
 func WithAssignments(a repository.StrategyAssignmentsRepository) Option {
 	return func(s *Service) { s.assignments = a }
+}
+
+// WithDispatcher подключает auto-dispatch hook (Этап 6): после успешного
+// ExecuteRecalcJob, если у магазина auto_update_enabled=true, вызывается
+// EnqueueDispatch для немедленной отправки plan-а в МП.
+func WithDispatcher(d DispatcherTrigger) Option {
+	return func(s *Service) { s.dispatcher = d }
 }
 
 // WithPriceSync включает автоматическую синхронизацию current_price товаров

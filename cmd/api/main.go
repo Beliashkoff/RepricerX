@@ -53,6 +53,7 @@ import (
 	auditsvc "github.com/Beliashkoff/RepricerX/internal/service/audit"
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
 	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
+	dispatchersvc "github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -136,6 +137,21 @@ func main() {
 			return ozon.NewClient(shopID, b, limiter)
 		},
 	}
+	// Этап 6: dispatcher (отправка цен в МП).
+	dispatcherFactories := map[string]dispatchersvc.MarketplaceFactory{
+		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(shopID, b, limiter)
+		},
+		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(shopID, b, limiter)
+		},
+	}
+	dispatcherService := dispatchersvc.New(
+		plansRepo, productsRepo, priceChangesRepo, intLogRepo,
+		shopsRepo, jobsRepo,
+		cfg.AppSecretKey, dispatcherFactories,
+	)
+
 	pricingService := pricingsvc.New(productsRepo, strategiesRepo,
 		pricingsvc.WithCompetitors(competitorsRepo),
 		pricingsvc.WithPlans(plansRepo),
@@ -143,6 +159,7 @@ func main() {
 		pricingsvc.WithShops(shopsRepo),
 		pricingsvc.WithAssignments(assignmentsRepo),
 		pricingsvc.WithPriceSync(cfg.AppSecretKey, pricingMarketplaceFactories, 60*time.Minute),
+		pricingsvc.WithDispatcher(dispatcherService),
 	)
 	auditService := auditsvc.New(priceChangesRepo)
 
@@ -188,6 +205,7 @@ func main() {
 		CompetitorSvc:  competitorService,
 		StrategySvc:    strategyService,
 		PricingSvc:     pricingService,
+		DispatcherSvc:  dispatcherService,
 		AuditSvc:       auditService,
 		UsersRepo:      usersRepo,
 		Audit:          audit,
@@ -227,6 +245,13 @@ func main() {
 				log.Error("cleanup: integration_log", "error", err)
 			} else if n > 0 {
 				log.Info("cleanup: удалены записи integration_log", "count", n)
+			}
+			// Этап 6: retention 180 дней для price_change_log (ТЗ 4.1.1.8.2).
+			n, err = priceChangesRepo.DeleteOlderThan(context.Background(), time.Now().UTC().Add(-180*24*time.Hour))
+			if err != nil {
+				log.Error("cleanup: price_change_log", "error", err)
+			} else if n > 0 {
+				log.Info("cleanup: удалены записи price_change_log", "count", n)
 			}
 		}
 	}()
