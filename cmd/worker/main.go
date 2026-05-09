@@ -19,6 +19,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
+	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -55,6 +56,10 @@ func main() {
 	productsRepo := repository.NewProductsRepository(pool)
 	importLogRepo := repository.NewImportLogRepository(pool)
 	jobsRepo := repository.NewBackgroundJobsRepository(pool)
+	strategiesRepo := repository.NewStrategiesRepository(pool)
+	assignmentsRepo := repository.NewStrategyAssignmentsRepository(pool)
+	plansRepo := repository.NewPricePlansRepository(pool)
+	competitorsRepo := repository.NewProductCompetitorsRepository(pool)
 	limiter := ratelimit.New(5.0)
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
 		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
@@ -64,16 +69,32 @@ func main() {
 			return ozon.NewClient(shopID, b, limiter)
 		},
 	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts))
+	pricingMarketplaceFactories := map[string]pricingsvc.MarketplaceFactory{
+		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(shopID, b, limiter)
+		},
+		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(shopID, b, limiter)
+		},
+	}
+	pricingService := pricingsvc.New(productsRepo, strategiesRepo,
+		pricingsvc.WithCompetitors(competitorsRepo),
+		pricingsvc.WithPlans(plansRepo),
+		pricingsvc.WithJobs(jobsRepo),
+		pricingsvc.WithShops(shopsRepo),
+		pricingsvc.WithAssignments(assignmentsRepo),
+		pricingsvc.WithPriceSync(cfg.AppSecretKey, pricingMarketplaceFactories, 60*time.Minute),
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	log.Info("worker started", "worker_id", workerID, "concurrency", cfg.WorkerConcurrency)
-	run(ctx, log, workerID, cfg, jobsRepo, productService)
+	run(ctx, log, workerID, cfg, jobsRepo, productService, pricingService)
 	log.Info("worker stopped", "worker_id", workerID)
 }
 
-func run(ctx context.Context, log *slog.Logger, workerID string, cfg *config.Config, jobs repository.BackgroundJobsRepository, productService *productsvc.Service) {
+func run(ctx context.Context, log *slog.Logger, workerID string, cfg *config.Config, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, pricingService *pricingsvc.Service) {
 	sem := make(chan struct{}, cfg.WorkerConcurrency)
 	var wg sync.WaitGroup
 
@@ -109,17 +130,24 @@ func run(ctx context.Context, log *slog.Logger, workerID string, cfg *config.Con
 		go func(job *domain.BackgroundJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			processJob(log, jobs, productService, job, cfg.WorkerJobTimeout)
+			processJob(log, jobs, productService, pricingService, job, cfg.WorkerJobTimeout)
 		}(job)
 	}
 }
 
-func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, job *domain.BackgroundJob, timeout time.Duration) {
+func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, productService *productsvc.Service, pricingService *pricingsvc.Service, job *domain.BackgroundJob, timeout time.Duration) {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	log.Info("worker: job claimed", "job_id", job.ID, "job_type", job.JobType, "attempt", job.Attempts)
+
+	// Диспатч по типу джоба.
+	if job.JobType == domain.BackgroundJobTypePriceRecalculation {
+		processPricingJob(log, jobs, pricingService, job, started)
+		return
+	}
+
 	result := productService.ExecuteImportJob(ctx, job)
 	if result.Retryable {
 		runAt := time.Now().UTC().Add(backoff(job.Attempts))
@@ -145,6 +173,35 @@ func processJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, prod
 		return
 	}
 	log.Warn("worker: job failed", "job_id", job.ID, "import_id", result.ImportID, "public_code", result.PublicCode, "diagnostic", result.InternalError, "duration_ms", time.Since(started).Milliseconds())
+}
+
+func processPricingJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, pricingService *pricingsvc.Service, job *domain.BackgroundJob, started time.Time) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if err := pricingService.ExecuteRecalcJob(ctx, job); err != nil {
+		// Ретрай по общему паттерну backoff.
+		if job.Attempts < job.MaxAttempts {
+			runAt := time.Now().UTC().Add(backoff(job.Attempts))
+			if rerr := jobs.Retry(context.Background(), job.ID, runAt, err.Error()); rerr != nil {
+				log.Error("worker: pricing retry", "job_id", job.ID, "error", rerr)
+			} else {
+				log.Warn("worker: pricing job retry", "job_id", job.ID, "run_at", runAt, "error", err)
+			}
+			return
+		}
+		if ferr := jobs.Fail(context.Background(), job.ID, err.Error(), nil); ferr != nil {
+			log.Error("worker: pricing fail", "job_id", job.ID, "error", ferr)
+		} else {
+			log.Warn("worker: pricing job failed", "job_id", job.ID, "error", err)
+		}
+		return
+	}
+	if err := jobs.Succeed(context.Background(), job.ID, nil); err != nil {
+		log.Error("worker: pricing succeed", "job_id", job.ID, "error", err)
+		return
+	}
+	log.Info("worker: pricing job applied", "job_id", job.ID, "duration_ms", time.Since(started).Milliseconds())
 }
 
 func backoff(attempt int) time.Duration {

@@ -127,7 +127,23 @@ func main() {
 	})
 	strategyService := strategysvc.New(strategiesRepo, assignmentsRepo)
 	competitorService := competitorsvc.New(competitorsRepo, nil)
-	pricingService := pricingsvc.New(productsRepo, strategiesRepo, pricingsvc.WithCompetitors(competitorsRepo))
+	plansRepo := repository.NewPricePlansRepository(pool)
+	pricingMarketplaceFactories := map[string]pricingsvc.MarketplaceFactory{
+		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return wildberries.NewClient(shopID, b, limiter)
+		},
+		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+			return ozon.NewClient(shopID, b, limiter)
+		},
+	}
+	pricingService := pricingsvc.New(productsRepo, strategiesRepo,
+		pricingsvc.WithCompetitors(competitorsRepo),
+		pricingsvc.WithPlans(plansRepo),
+		pricingsvc.WithJobs(jobsRepo),
+		pricingsvc.WithShops(shopsRepo),
+		pricingsvc.WithAssignments(assignmentsRepo),
+		pricingsvc.WithPriceSync(cfg.AppSecretKey, pricingMarketplaceFactories, 60*time.Minute),
+	)
 	auditService := auditsvc.New(priceChangesRepo)
 
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{

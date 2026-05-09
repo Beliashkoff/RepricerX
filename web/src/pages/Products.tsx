@@ -24,6 +24,8 @@ import { productsApi } from '@/api/products'
 import { competitorsApi } from '@/api/competitors'
 import { shopsApi } from '@/api/shops'
 import { strategiesApi } from '@/api/strategies'
+import { pricingApi } from '@/api/pricing'
+import { useNavigate } from 'react-router-dom'
 import type { Competitor, ImportStatus, Product, ProductListParams, ProductSortField, SortDir, Strategy } from '@/types/api'
 import { formatPrice, formatDate } from '@/lib/utils'
 import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X, Plus, RefreshCw, Save, Trash2, ExternalLink } from 'lucide-react'
@@ -448,6 +450,7 @@ function ImportErrorsDialog({ importId, onClose }: { importId: string; onClose: 
 
 export default function Products() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   // filter state
   const [page, setPage] = useState(1)
@@ -633,6 +636,25 @@ export default function Products() {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const recalcMutation = useMutation({
+    mutationFn: () => {
+      const productIDs = Array.from(selectedIds)
+      // Берём shopId либо из фильтра, либо из первого выбранного товара.
+      const ids = productIDs
+      const firstShopId = shopFilter || products.find(p => ids.includes(p.id))?.shop_id
+      if (!firstShopId) {
+        return Promise.reject(new Error('Не удалось определить магазин для пересчёта'))
+      }
+      return pricingApi.recalculate({ shop_id: firstShopId, product_ids: ids })
+    },
+    onSuccess: (data) => {
+      toast.success(`План пересчёта создан, обработка началась`)
+      setSelectedIds(new Set())
+      navigate(`/price-plans/${data.plan.id}`)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
   const visibleImportId = activeImportId ?? lastImportId
   const importStatus = activeImportId ? importStatusQuery.data : lastImportStatus
   const isImportActive = Boolean(activeImportId && importStatus && activeImportStatuses.includes(importStatus.status))
@@ -769,6 +791,13 @@ export default function Products() {
               onClick={() => setAssignOpen(true)}
             >
               Назначить стратегию
+            </Button>
+            <Button
+              variant="secondary" size="sm"
+              onClick={() => recalcMutation.mutate()}
+              disabled={recalcMutation.isPending}
+            >
+              {recalcMutation.isPending ? 'Создаём план…' : 'Пересчитать цены'}
             </Button>
             <button className="text-xs text-[#999] hover:text-[#333] ml-auto"
               onClick={() => setSelectedIds(new Set())}>

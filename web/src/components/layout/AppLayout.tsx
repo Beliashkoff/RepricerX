@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
   LayoutDashboard, Store, Package, TrendingUp, BarChart2,
-  BookOpen, Settings, LogOut, ChevronRight, Bell,
+  BookOpen, Settings, LogOut, ChevronRight, Bell, ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { path: '/products', label: 'Товары', icon: Package },
   { path: '/strategies', label: 'Стратегии', icon: TrendingUp },
   { path: '/pricing', label: 'Симуляция', icon: BarChart2 },
+  { path: '/price-plans', label: 'Планы цен', icon: ListChecks },
   { path: '/audit', label: 'Журнал', icon: BookOpen },
   { path: '/settings', label: 'Настройки', icon: Settings },
 ]

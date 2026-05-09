@@ -25,17 +25,27 @@ export default function Pricing() {
 
   const [productId, setProductId] = useState('')
   const [strategyId, setStrategyId] = useState('')
-  const [competitorPrice, setCompetitorPrice] = useState('')
+  const [competitorInput, setCompetitorInput] = useState('')
+  const [competitorPrices, setCompetitorPrices] = useState<number[]>([])
   const [result, setResult] = useState<SimulateResult | null>(null)
 
   const selectedProduct = products.find(p => p.id === productId)
+
+  const addCompetitorPrice = () => {
+    const v = Number(competitorInput)
+    if (!Number.isFinite(v) || v <= 0) return
+    setCompetitorPrices(prev => [...prev, v])
+    setCompetitorInput('')
+  }
+  const removeCompetitorPrice = (i: number) =>
+    setCompetitorPrices(prev => prev.filter((_, idx) => idx !== i))
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => pricingApi.simulate({
       product_id: productId,
       strategy_id: strategyId,
       current_price: selectedProduct?.current_price ?? 0,
-      competitor_price: competitorPrice.trim() ? Number(competitorPrice) : undefined,
+      competitor_prices: competitorPrices.length > 0 ? competitorPrices : undefined,
       cost_price: selectedProduct?.cost_price ?? undefined,
     }),
     onSuccess: (data) => setResult(data),
@@ -75,8 +85,34 @@ export default function Pricing() {
               </div>
             )}
             <div>
-              <Label htmlFor="comp-price">Ручная цена конкурента</Label>
-              <Input id="comp-price" type="number" className="mt-1.5" placeholder="Например: 8500" value={competitorPrice} onChange={e => setCompetitorPrice(e.target.value)} />
+              <Label htmlFor="comp-price">Цены конкурентов (можно несколько)</Label>
+              <div className="flex gap-2 mt-1.5">
+                <Input
+                  id="comp-price" type="number"
+                  placeholder="Например: 8500"
+                  value={competitorInput}
+                  onChange={e => setCompetitorInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCompetitorPrice() } }}
+                />
+                <Button variant="secondary" type="button" onClick={addCompetitorPrice}>+</Button>
+              </div>
+              {competitorPrices.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {competitorPrices.map((p, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => removeCompetitorPrice(i)}
+                      className="text-xs px-2 py-1 bg-[#f0f0f0] hover:bg-[#e6e6e6] rounded-md flex items-center gap-1"
+                    >
+                      {formatPrice(p)} <span className="text-[#999]">×</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-[#888] mt-1">
+                Если не задано — используются конкуренты товара из БД (для медианы).
+              </p>
             </div>
             <Button disabled={!productId || !strategyId || isPending} onClick={() => mutate()} className="mt-2">
               {isPending ? 'Считаем...' : 'Рассчитать'}
@@ -127,10 +163,18 @@ export default function Pricing() {
                 </div>
               )}
 
-              {result.constraint_hit ? (
+              {result.status === 'skipped' ? (
+                <div className="flex items-start gap-2 bg-orange-50 rounded-xl p-3 text-xs text-orange-700">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  Расчёт пропущен (skipped). Применена резервная политика.
+                </div>
+              ) : result.constraint_hit ? (
                 <div className="flex items-start gap-2 bg-yellow-50 rounded-xl p-3 text-xs text-yellow-700">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                   Сработало ограничение: {result.constraint_hit}
+                  {result.constraint_hit === 'cost_price_floor' && (
+                    <span className="ml-1 font-medium">(защита от убытков)</span>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center gap-2 bg-green-50 rounded-xl p-3 text-xs text-green-700">

@@ -59,6 +59,7 @@ var (
 	testMailer     *capturingMailer
 	testShopSvc    *shopsvc.Service
 	testProductSvc *productsvc.Service
+	testPricingSvc *pricingsvc.Service
 	// allowAuthFail управляет тем, вернёт ли fakeMarketplace ошибку auth.
 	testShopAuthFail        bool
 	testSKUs                []integration.SKU
@@ -194,7 +195,12 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 		repository.NewProductsRepository(pool),
 		repository.NewStrategiesRepository(pool),
 		pricingsvc.WithCompetitors(repository.NewProductCompetitorsRepository(pool)),
+		pricingsvc.WithPlans(repository.NewPricePlansRepository(pool)),
+		pricingsvc.WithJobs(repository.NewBackgroundJobsRepository(pool)),
+		pricingsvc.WithShops(repository.NewShopsRepository(pool)),
+		pricingsvc.WithAssignments(repository.NewStrategyAssignmentsRepository(pool)),
 	)
+	testPricingSvc = pricingSvc
 	competitorSvc := competitorsvc.New(repository.NewProductCompetitorsRepository(pool), fakeOzonCompetitorLookup{})
 	auditSvc := auditsvc.New(repository.NewPriceChangesRepository(pool))
 
@@ -220,7 +226,7 @@ func buildServer(pool *pgxpool.Pool, m mailer.Mailer) *httptest.Server {
 func truncate(t *testing.T) {
 	t.Helper()
 	_, err := testPool.Exec(context.Background(), `
-		TRUNCATE TABLE strategy_assignments, strategies, background_jobs, import_log, integration_log, products, shops, password_reset_tokens, email_verifications, sessions, users
+		TRUNCATE TABLE price_plan_items, price_plans, price_change_log, strategy_assignments, strategies, background_jobs, import_log, integration_log, competitor_price_snapshots, product_competitors, competitors, products, shops, password_reset_tokens, email_verifications, sessions, users
 		RESTART IDENTITY CASCADE
 	`)
 	testShopAuthFail = false

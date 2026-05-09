@@ -100,6 +100,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/audit/price-changes", auditH.ListChanges)
 		protected.GET("/audit/summary", auditH.Summary)
 		protected.GET("/audit/export", auditH.ExportCSV)
+		protected.GET("/price-plans", pricingH.ListPlans)
+		protected.GET("/price-plans/:id", pricingH.GetPlan)
 		importPollingLimit := rateLimit(cfg.RateLimiter,
 			rateLimitSpec{Scope: "imports:poll:session", Limit: limitImportSession, Window: time.Minute, Key: sessionRateKey},
 			rateLimitSpec{Scope: "imports:poll:user", Limit: limitImportUser, Window: time.Minute, Key: userRateKey},
@@ -137,6 +139,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.POST("/strategies/:id/assignments", strategyH.Assign)
 			mutating.DELETE("/strategies/:id/assignments", strategyH.Unassign)
 			mutating.POST("/pricing/simulate", pricingH.Simulate)
+			mutating.POST("/pricing/recalculate", pricingH.Recalculate)
 		}
 	}
 }

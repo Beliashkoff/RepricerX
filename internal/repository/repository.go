@@ -132,6 +132,23 @@ type PriceChangesRepository interface {
 	ExportForUser(ctx context.Context, userID uuid.UUID) ([]*domain.PriceChange, error)
 }
 
+// PricePlansRepository — план изменений цен (Этап 5).
+// Owner-проверки: GetByIDForUser/ListByUser делают JOIN с shops по user_id.
+// Create/UpdateStatus/InsertItems вызываются только из доверенных кодовых путей
+// (worker, service.Recalculate), которые сами уже проверили ownership shop.
+type PricePlansRepository interface {
+	Create(ctx context.Context, shopID uuid.UUID) (*domain.PricePlan, error)
+	GetByIDForUser(ctx context.Context, userID, planID uuid.UUID) (*domain.PricePlan, []*domain.PricePlanItem, error)
+	ListByUser(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.PricePlan, int, error)
+	UpdateStatus(ctx context.Context, planID uuid.UUID, status string) error
+	InsertItems(ctx context.Context, planID uuid.UUID, items []*domain.PricePlanItem) error
+	// LatestItemCreatedAt возвращает время самого свежего price_plan_item для товара
+	// со статусом pending или applied (НЕ skipped/failed).
+	// Используется для проверки constraint min_interval_minutes.
+	// Возвращает (nil, nil) если истории нет.
+	LatestItemCreatedAt(ctx context.Context, productID uuid.UUID) (*time.Time, error)
+}
+
 type CompetitorCreateInput struct {
 	ProductID               uuid.UUID
 	Marketplace             string
@@ -261,9 +278,23 @@ type ImportLogRepository interface {
 	ListErrors(ctx context.Context, userID, importID uuid.UUID, page, perPage int) ([]domain.ImportLogError, int, error)
 }
 
+// BackgroundJobEnqueue — параметры enqueue нового джоба.
+type BackgroundJobEnqueue struct {
+	JobType     string
+	Queue       string // "default" если пусто
+	Priority    int
+	Payload     []byte
+	MaxAttempts int    // 3 если 0
+	RunAt       time.Time // now если zero
+}
+
 type BackgroundJobsRepository interface {
 	ClaimNext(ctx context.Context, queue, workerID string, lockTTL time.Duration) (*domain.BackgroundJob, error)
 	Succeed(ctx context.Context, id uuid.UUID, result []byte) error
 	Retry(ctx context.Context, id uuid.UUID, runAt time.Time, lastError string) error
 	Fail(ctx context.Context, id uuid.UUID, lastError string, result []byte) error
+	// Enqueue — общий метод постановки задачи. Используется для price_recalculation
+	// и других generic-джобов. EnqueueProductImport остаётся специализированным
+	// (под import_log + дедуп cooldown).
+	Enqueue(ctx context.Context, in BackgroundJobEnqueue) (*domain.BackgroundJob, error)
 }

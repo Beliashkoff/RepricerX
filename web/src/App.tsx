@@ -15,6 +15,7 @@ import Shops from '@/pages/Shops'
 import Products from '@/pages/Products'
 import Strategies from '@/pages/Strategies'
 import Pricing from '@/pages/Pricing'
+import { PricePlansList, PricePlanDetail } from '@/pages/PricePlans'
 import Audit from '@/pages/Audit'
 import Settings from '@/pages/Settings'
 
@@ -53,6 +54,8 @@ function AppRoutes() {
         <Route path="/products" element={<ProtectedRoute><Products /></ProtectedRoute>} />
         <Route path="/strategies" element={<ProtectedRoute><Strategies /></ProtectedRoute>} />
         <Route path="/pricing" element={<ProtectedRoute><Pricing /></ProtectedRoute>} />
+        <Route path="/price-plans" element={<ProtectedRoute><PricePlansList /></ProtectedRoute>} />
+        <Route path="/price-plans/:id" element={<ProtectedRoute><PricePlanDetail /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute><Audit /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

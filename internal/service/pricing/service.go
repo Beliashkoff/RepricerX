@@ -9,27 +9,41 @@ import (
 	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
+	"github.com/Beliashkoff/RepricerX/internal/integration"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/google/uuid"
 )
 
+// MarketplaceFactory создаёт клиент маркетплейса по shopID и расшифрованным credentials.
+// Та же сигнатура, что в shop.MarketplaceFactory / product.MarketplaceFactory —
+// дублируется здесь, чтобы избежать импорта shop/product service из pricing.
+type MarketplaceFactory func(shopID string, credsJSON []byte) (integration.Marketplace, error)
+
 var (
 	ErrProductNotFound   = errors.New("product not found")
 	ErrStrategyNotFound  = errors.New("strategy not found")
+	ErrShopNotFound      = errors.New("shop not found")
+	ErrPlanNotFound      = errors.New("price plan not found")
 	ErrInvalidSimulation = errors.New("invalid pricing simulation")
 )
 
+const maxRecalculateBatch = 1000
+
+// SimulateInput — обратно совместим с API. CompetitorPrice — одна цена;
+// CompetitorPrices — список (для медианы). Если переданы оба, берётся CompetitorPrices.
 type SimulateInput struct {
-	ProductID       uuid.UUID
-	StrategyID      uuid.UUID
-	CompetitorPrice *float64
-	CostPrice       *float64
+	ProductID        uuid.UUID
+	StrategyID       uuid.UUID
+	CompetitorPrice  *float64
+	CompetitorPrices []float64
+	CostPrice        *float64
 }
 
 type SimulateResult struct {
 	TargetPrice      float64
 	FinalPrice       float64
 	ConstraintHit    *string
+	Status           string
 	Reason           string
 	ChangePct        float64
 	CompetitorPrice  *float64
@@ -40,24 +54,66 @@ type Service struct {
 	products         repository.ProductsRepository
 	strategies       repository.StrategiesRepository
 	competitors      repository.ProductCompetitorsRepository
+	plans            repository.PricePlansRepository
+	jobs             repository.BackgroundJobsRepository
+	shops            repository.ShopsRepository
+	assignments      repository.StrategyAssignmentsRepository
 	competitorMaxAge time.Duration
+	priceMaxAge      time.Duration // sync через ListSKUs если old; 0 = sync выключен
+	secret           string        // для расшифровки credentials_encrypted
+	factories        map[string]MarketplaceFactory
 }
 
 type Option func(*Service)
 
 func WithCompetitors(repo repository.ProductCompetitorsRepository) Option {
+	return func(s *Service) { s.competitors = repo }
+}
+
+func WithPlans(plans repository.PricePlansRepository) Option {
+	return func(s *Service) { s.plans = plans }
+}
+
+func WithJobs(jobs repository.BackgroundJobsRepository) Option {
+	return func(s *Service) { s.jobs = jobs }
+}
+
+func WithShops(shops repository.ShopsRepository) Option {
+	return func(s *Service) { s.shops = shops }
+}
+
+func WithAssignments(a repository.StrategyAssignmentsRepository) Option {
+	return func(s *Service) { s.assignments = a }
+}
+
+// WithPriceSync включает автоматическую синхронизацию current_price товаров
+// старше maxAge через MarketplaceFactory. Если хотя бы один товар в plan-е
+// имеет last_synced_at старше maxAge, ListSKUs вызывается один раз для всего
+// магазина перед расчётом, и products.UpsertImported обновляет цены.
+//
+// secret — APP_SECRET_KEY для расшифровки shops.credentials_encrypted.
+// factories — те же factories, что и в product/shop service (по 1 на marketplace).
+func WithPriceSync(secret string, factories map[string]MarketplaceFactory, maxAge time.Duration) Option {
 	return func(s *Service) {
-		s.competitors = repo
+		s.secret = secret
+		s.factories = factories
+		s.priceMaxAge = maxAge
 	}
 }
 
 func New(products repository.ProductsRepository, strategies repository.StrategiesRepository, opts ...Option) *Service {
-	s := &Service{products: products, strategies: strategies, competitorMaxAge: 24 * time.Hour}
+	s := &Service{
+		products:         products,
+		strategies:       strategies,
+		competitorMaxAge: 24 * time.Hour,
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
 	return s
 }
+
+// ─── Simulate ────────────────────────────────────────────────────────────────
 
 func (s *Service) Simulate(ctx context.Context, userID uuid.UUID, input SimulateInput) (*SimulateResult, error) {
 	product, err := s.products.GetByIDForUser(ctx, userID, input.ProductID)
@@ -67,6 +123,11 @@ func (s *Service) Simulate(ctx context.Context, userID uuid.UUID, input Simulate
 	if err != nil {
 		return nil, err
 	}
+	if input.CostPrice != nil {
+		// override cost для симуляции
+		product.CostPrice = input.CostPrice
+	}
+
 	strategy, err := s.strategies.GetByIDForUser(ctx, userID, input.StrategyID)
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrStrategyNotFound
@@ -74,141 +135,133 @@ func (s *Service) Simulate(ctx context.Context, userID uuid.UUID, input Simulate
 	if err != nil {
 		return nil, err
 	}
-	if !strategy.Enabled {
-		return nil, fmt.Errorf("%w: strategy disabled", ErrInvalidSimulation)
-	}
-	competitorPrice := input.CompetitorPrice
-	competitorSource := ""
-	if competitorPrice != nil {
-		competitorSource = "manual"
-	} else if s.competitors != nil {
-		latest, err := s.competitors.LatestFreshPrice(ctx, userID, input.ProductID, s.competitorMaxAge)
-		if err != nil && !errors.Is(err, repository.ErrNotFound) {
-			return nil, err
-		}
-		if latest != nil {
-			competitorPrice = latest
-			competitorSource = "auto"
-		}
-	}
 
-	calcInput := input
-	calcInput.CompetitorPrice = competitorPrice
-	target, reason, err := calculateTarget(product.CurrentPrice, product.CostPrice, calcInput, strategy)
-	if err != nil {
-		return nil, err
+	competitorPrices, source := s.resolveCompetitorPrices(ctx, userID, input)
+
+	res := Calculate(CalculateInput{
+		Product:          product,
+		Strategy:         strategy,
+		CompetitorPrices: competitorPrices,
+	})
+
+	var hit *string
+	if res.ConstraintHit != "" {
+		h := res.ConstraintHit
+		hit = &h
 	}
-	final, hit := applyConstraints(product.CurrentPrice, target, strategy.Constraints)
+	var firstCompetitor *float64
+	if len(competitorPrices) > 0 {
+		c := competitorPrices[0]
+		firstCompetitor = &c
+	}
 	return &SimulateResult{
-		TargetPrice:      roundMoney(target),
-		FinalPrice:       roundMoney(final),
+		TargetPrice:      res.TargetPrice,
+		FinalPrice:       res.FinalPrice,
 		ConstraintHit:    hit,
-		Reason:           reason,
-		ChangePct:        roundPercent(percentChange(product.CurrentPrice, final)),
-		CompetitorPrice:  competitorPrice,
-		CompetitorSource: competitorSource,
+		Status:           res.Status,
+		Reason:           res.Reason,
+		ChangePct:        roundPercent(percentChange(product.CurrentPrice, res.FinalPrice)),
+		CompetitorPrice:  firstCompetitor,
+		CompetitorSource: source,
 	}, nil
 }
 
-func calculateTarget(current float64, productCost *float64, input SimulateInput, strategy *domain.Strategy) (float64, string, error) {
-	switch strategy.Type {
-	case domain.StrategyTypeFixed:
-		var params struct {
-			Value float64 `json:"value"`
-			Price float64 `json:"price"`
+// resolveCompetitorPrices: приоритет — input.CompetitorPrices, потом input.CompetitorPrice (одна),
+// потом БД (latest fresh price из ProductCompetitors).
+func (s *Service) resolveCompetitorPrices(ctx context.Context, userID uuid.UUID, input SimulateInput) ([]float64, string) {
+	if len(input.CompetitorPrices) > 0 {
+		out := make([]float64, 0, len(input.CompetitorPrices))
+		for _, p := range input.CompetitorPrices {
+			if p > 0 {
+				out = append(out, p)
+			}
 		}
-		if err := json.Unmarshal(strategy.Params, &params); err != nil {
-			return 0, "", fmt.Errorf("%w: invalid fixed params", ErrInvalidSimulation)
+		if len(out) > 0 {
+			return out, "manual"
 		}
-		target := params.Value
-		if target == 0 {
-			target = params.Price
-		}
-		if target <= 0 {
-			return 0, "", fmt.Errorf("%w: fixed price required", ErrInvalidSimulation)
-		}
-		return target, "fixed: фиксированная цена", nil
-	case domain.StrategyTypeBelowMedianPct:
-		var params struct {
-			Pct float64 `json:"pct"`
-		}
-		if err := json.Unmarshal(strategy.Params, &params); err != nil {
-			return 0, "", fmt.Errorf("%w: invalid below_median_pct params", ErrInvalidSimulation)
-		}
-		base := current
-		if input.CompetitorPrice != nil && *input.CompetitorPrice > 0 {
-			base = *input.CompetitorPrice
-		}
-		return base * (1 - params.Pct/100), "below_median_pct: расчёт относительно цены конкурента", nil
-	case domain.StrategyTypeMinCompetitorPlusStep:
-		if input.CompetitorPrice == nil || *input.CompetitorPrice <= 0 {
-			return 0, "", fmt.Errorf("%w: competitor_price required", ErrInvalidSimulation)
-		}
-		var params struct {
-			Step float64 `json:"step"`
-		}
-		if err := json.Unmarshal(strategy.Params, &params); err != nil {
-			return 0, "", fmt.Errorf("%w: invalid min_competitor_plus_step params", ErrInvalidSimulation)
-		}
-		return *input.CompetitorPrice + params.Step, "min_competitor_plus_step: цена конкурента плюс шаг", nil
-	case domain.StrategyTypeMinMarginPct:
-		cost := productCost
-		if input.CostPrice != nil {
-			cost = input.CostPrice
-		}
-		if cost == nil || *cost <= 0 {
-			return 0, "", fmt.Errorf("%w: cost_price required", ErrInvalidSimulation)
-		}
-		var params struct {
-			MarginPct float64 `json:"margin_pct"`
-		}
-		if err := json.Unmarshal(strategy.Params, &params); err != nil {
-			return 0, "", fmt.Errorf("%w: invalid min_margin_pct params", ErrInvalidSimulation)
-		}
-		return *cost * (1 + params.MarginPct/100), "min_margin_pct: цена с минимальной маржой", nil
-	default:
-		return 0, "", fmt.Errorf("%w: unknown strategy type", ErrInvalidSimulation)
 	}
+	if input.CompetitorPrice != nil && *input.CompetitorPrice > 0 {
+		return []float64{*input.CompetitorPrice}, "manual"
+	}
+	if s.competitors != nil {
+		latest, err := s.competitors.LatestFreshPrice(ctx, userID, input.ProductID, s.competitorMaxAge)
+		if err == nil && latest != nil && *latest > 0 {
+			return []float64{*latest}, "auto"
+		}
+	}
+	return nil, ""
 }
 
-func applyConstraints(current, target float64, raw json.RawMessage) (float64, *string) {
-	var c struct {
-		MinPrice     *float64 `json:"min_price"`
-		MaxPrice     *float64 `json:"max_price"`
-		MaxChangePct *float64 `json:"max_change_pct"`
-	}
-	_ = json.Unmarshal(raw, &c)
+// ─── Recalculate (async) ─────────────────────────────────────────────────────
 
-	final := target
-	var hit *string
-	setHit := func(name string) {
-		if hit == nil {
-			hit = &name
+// Recalculate создаёт PricePlan(status=pending) и enqueue job для воркера.
+// productIDs пуст → весь магазин (все товары с назначенной стратегией).
+func (s *Service) Recalculate(ctx context.Context, userID, shopID uuid.UUID, productIDs []uuid.UUID) (*domain.PricePlan, *domain.BackgroundJob, error) {
+	if s.plans == nil || s.jobs == nil || s.shops == nil {
+		return nil, nil, errors.New("pricing service: plans/jobs/shops repositories required for Recalculate")
+	}
+
+	if _, err := s.shops.GetByID(ctx, shopID, userID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, nil, ErrShopNotFound
 		}
+		return nil, nil, fmt.Errorf("recalculate: get shop: %w", err)
 	}
-	if c.MinPrice != nil && final < *c.MinPrice {
-		final = *c.MinPrice
-		setHit("min_price")
+
+	if len(productIDs) > maxRecalculateBatch {
+		return nil, nil, fmt.Errorf("%w: max %d products per recalculation", ErrInvalidSimulation, maxRecalculateBatch)
 	}
-	if c.MaxPrice != nil && final > *c.MaxPrice {
-		final = *c.MaxPrice
-		setHit("max_price")
+
+	plan, err := s.plans.Create(ctx, shopID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("recalculate: create plan: %w", err)
 	}
-	if c.MaxChangePct != nil && current > 0 {
-		limit := current * (*c.MaxChangePct / 100)
-		minAllowed := current - limit
-		maxAllowed := current + limit
-		if final < minAllowed {
-			final = minAllowed
-			setHit("max_change_pct")
-		}
-		if final > maxAllowed {
-			final = maxAllowed
-			setHit("max_change_pct")
-		}
+
+	payload := domain.PriceRecalculationJobPayload{
+		PlanID:            plan.ID,
+		ShopID:            shopID,
+		ProductIDs:        productIDs,
+		RequestedByUserID: userID,
 	}
-	return final, hit
+	payloadBytes, _ := json.Marshal(payload)
+
+	job, err := s.jobs.Enqueue(ctx, repository.BackgroundJobEnqueue{
+		JobType:     domain.BackgroundJobTypePriceRecalculation,
+		Queue:       "default",
+		Priority:    100,
+		Payload:     payloadBytes,
+		MaxAttempts: 3,
+	})
+	if err != nil {
+		// откат статуса плана — иначе он останется висеть
+		_ = s.plans.UpdateStatus(ctx, plan.ID, domain.PlanStatusFailed)
+		return nil, nil, fmt.Errorf("recalculate: enqueue job: %w", err)
+	}
+	return plan, job, nil
 }
+
+func (s *Service) GetPlan(ctx context.Context, userID, planID uuid.UUID) (*domain.PricePlan, []*domain.PricePlanItem, error) {
+	if s.plans == nil {
+		return nil, nil, errors.New("plans repository not configured")
+	}
+	plan, items, err := s.plans.GetByIDForUser(ctx, userID, planID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, nil, ErrPlanNotFound
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return plan, items, nil
+}
+
+func (s *Service) ListPlans(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.PricePlan, int, error) {
+	if s.plans == nil {
+		return nil, 0, errors.New("plans repository not configured")
+	}
+	return s.plans.ListByUser(ctx, userID, limit, offset)
+}
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
 func percentChange(current, next float64) float64 {
 	if current == 0 {
@@ -218,6 +271,9 @@ func percentChange(current, next float64) float64 {
 }
 
 func roundMoney(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
 	return math.Round(v*100) / 100
 }
 

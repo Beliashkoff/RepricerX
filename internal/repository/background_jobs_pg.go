@@ -17,6 +17,37 @@ func NewBackgroundJobsRepository(db *pgxpool.Pool) BackgroundJobsRepository {
 	return &backgroundJobsPg{db: db}
 }
 
+func (r *backgroundJobsPg) Enqueue(ctx context.Context, in BackgroundJobEnqueue) (*domain.BackgroundJob, error) {
+	queue := in.Queue
+	if queue == "" {
+		queue = "default"
+	}
+	maxAttempts := in.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	runAt := in.RunAt
+	if runAt.IsZero() {
+		runAt = time.Now().UTC()
+	}
+	id := uuid.New()
+	now := time.Now().UTC()
+
+	row := r.db.QueryRow(ctx, `
+		INSERT INTO background_jobs
+			(id, job_type, status, queue, priority, payload, result,
+			 attempts, max_attempts, run_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb, 0, $7, $8, $9, $9)
+		RETURNING id, job_type, status::text, queue, priority, payload, result,
+		          attempts, max_attempts, run_at, locked_at, locked_by,
+		          lock_expires_at, last_error, created_at, updated_at,
+		          started_at, finished_at, canceled_at`,
+		id, in.JobType, domain.BackgroundJobStatusPending, queue, in.Priority,
+		in.Payload, maxAttempts, runAt, now,
+	)
+	return scanBackgroundJob(row)
+}
+
 func (r *backgroundJobsPg) ClaimNext(ctx context.Context, queue, workerID string, lockTTL time.Duration) (*domain.BackgroundJob, error) {
 	row := r.db.QueryRow(ctx, `
 		WITH picked AS (

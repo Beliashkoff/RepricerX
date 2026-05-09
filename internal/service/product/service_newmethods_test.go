@@ -195,6 +195,9 @@ func (r *fakeJobsRepo) ClaimNext(_ context.Context, _, _ string, _ time.Duration
 func (r *fakeJobsRepo) Retry(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error { return nil }
 func (r *fakeJobsRepo) Succeed(_ context.Context, _ uuid.UUID, _ []byte) error            { return nil }
 func (r *fakeJobsRepo) Fail(_ context.Context, _ uuid.UUID, _ string, _ []byte) error     { return nil }
+func (r *fakeJobsRepo) Enqueue(_ context.Context, _ repository.BackgroundJobEnqueue) (*domain.BackgroundJob, error) {
+	return &domain.BackgroundJob{}, nil
+}
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
