@@ -229,6 +229,42 @@ definitions:
       total:
         type: integer
     type: object
+  transport.priceChangeListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/transport.priceChangeResponse'
+        type: array
+      pagination:
+        $ref: '#/definitions/transport.paginationInfo'
+    type: object
+  transport.priceChangeResponse:
+    properties:
+      constraint_hit:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      new_price:
+        type: number
+      old_price:
+        type: number
+      product_id:
+        type: string
+      product_name:
+        type: string
+      reason:
+        type: string
+      shop_id:
+        type: string
+      status:
+        type: string
+      strategy_id:
+        type: string
+      target_price:
+        type: number
+    type: object
   transport.productListResponse:
     properties:
       items:
@@ -334,6 +370,9 @@ definitions:
         type: string
       lastCheckedAt:
         type: string
+      lastRecalcAt:
+        description: Этап 7
+        type: string
       marketplace:
         example: wb
         type: string
@@ -346,6 +385,21 @@ definitions:
       status:
         example: active
         type: string
+    type: object
+  transport.summaryResponse:
+    properties:
+      avg_change_pct:
+        type: number
+      failed_updates:
+        type: integer
+      period_end:
+        type: string
+      period_start:
+        type: string
+      successful_updates:
+        type: integer
+      total_updates:
+        type: integer
     type: object
   transport.testConnectionResponse:
     properties:
@@ -395,6 +449,128 @@ info:
   title: RepricerX API
   version: "1.0"
 paths:
+  /api/audit/price-changes:
+    get:
+      description: Пагинированный список изменений цен с фильтрами. Хранение записей
+        — 180 дней.
+      parameters:
+      - description: UUID магазина
+        in: query
+        name: shop_id
+        type: string
+      - description: UUID товара
+        in: query
+        name: product_id
+        type: string
+      - description: Подстрока external_sku товара (ILIKE)
+        in: query
+        name: external_sku
+        type: string
+      - description: success | failed | skipped
+        in: query
+        name: status
+        type: string
+      - description: Начало периода (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Конец периода (RFC3339)
+        in: query
+        name: to
+        type: string
+      - description: Страница (>=1)
+        in: query
+        name: page
+        type: integer
+      - description: Размер страницы (1..200)
+        in: query
+        name: per_page
+        type: integer
+      - description: asc | desc (default desc)
+        in: query
+        name: sort_dir
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/transport.priceChangeListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Журнал изменений цен
+      tags:
+      - audit
+  /api/audit/price-changes.csv:
+    get:
+      description: CSV-выгрузка журнала с теми же фильтрами, что и список. Лимит 10
+        000 строк — при большем объёме нужно сужать фильтр.
+      parameters:
+      - description: UUID магазина
+        in: query
+        name: shop_id
+        type: string
+      - description: UUID товара
+        in: query
+        name: product_id
+        type: string
+      - description: Подстрока external_sku товара
+        in: query
+        name: external_sku
+        type: string
+      - description: success | failed | skipped
+        in: query
+        name: status
+        type: string
+      - description: Начало периода (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Конец периода (RFC3339)
+        in: query
+        name: to
+        type: string
+      - description: asc | desc (default desc)
+        in: query
+        name: sort_dir
+        type: string
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV-файл
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: CSV-экспорт журнала
+      tags:
+      - audit
   /api/auth/login:
     post:
       consumes:
@@ -899,6 +1075,41 @@ paths:
       summary: Детали ошибок импорта
       tags:
       - products
+  /api/price-plans/{id}/cancel:
+    post:
+      parameters:
+      - description: plan ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+      security:
+      - SessionCookie: []
+      summary: Отменить план
+      tags:
+      - pricing
+  /api/price-plans/{id}/dispatch:
+    post:
+      parameters:
+      - description: plan ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - SessionCookie: []
+      summary: Запустить отправку плана в маркетплейс
+      tags:
+      - pricing
   /api/products:
     get:
       description: Возвращает постраничный список товаров пользователя с фильтрацией
@@ -1239,6 +1450,60 @@ paths:
       summary: Экспорт каталога в CSV
       tags:
       - products
+  /api/reports/summary:
+    get:
+      description: Агрегированные метрики (всего/успех/ошибки/среднее изменение) за
+        параметризуемый период (по умолчанию — 30 дней). Поддерживает те же фильтры,
+        что и список.
+      parameters:
+      - description: UUID магазина
+        in: query
+        name: shop_id
+        type: string
+      - description: UUID товара
+        in: query
+        name: product_id
+        type: string
+      - description: Подстрока external_sku товара
+        in: query
+        name: external_sku
+        type: string
+      - description: success | failed | skipped
+        in: query
+        name: status
+        type: string
+      - description: Начало периода (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Конец периода (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/transport.summaryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/transport.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Сводка по изменениям цен
+      tags:
+      - reports
   /api/shops:
     get:
       description: Возвращает все магазины, принадлежащие аутентифицированному пользователю.
@@ -1545,6 +1810,25 @@ paths:
       summary: Запустить импорт SKU
       tags:
       - products
+  /api/shops/{id}/run-now:
+    post:
+      parameters:
+      - description: shop ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - SessionCookie: []
+      summary: Запустить пересчёт цен магазина сейчас
+      tags:
+      - shops
   /api/shops/{id}/test:
     post:
       description: |-

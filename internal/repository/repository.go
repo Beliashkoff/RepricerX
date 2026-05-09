@@ -137,9 +137,13 @@ type StrategyAssignmentsRepository interface {
 }
 
 type PriceChangesRepository interface {
-	ListForUser(ctx context.Context, userID uuid.UUID, limit int) ([]*domain.PriceChange, error)
-	SummaryForUser(ctx context.Context, userID uuid.UUID, since time.Time, until time.Time) (*domain.PriceChangeSummary, error)
-	ExportForUser(ctx context.Context, userID uuid.UUID) ([]*domain.PriceChange, error)
+	// ListForUser возвращает страницу записей журнала и общее число записей,
+	// удовлетворяющих фильтру (для пагинатора).
+	ListForUser(ctx context.Context, userID uuid.UUID, f PriceChangeFilter) (items []*domain.PriceChange, total int, err error)
+	// ExportForUser применяет тот же фильтр, что и ListForUser, но без LIMIT/OFFSET
+	// (защитный потолок 10 000 строк зашит в реализации).
+	ExportForUser(ctx context.Context, userID uuid.UUID, f PriceChangeFilter) ([]*domain.PriceChange, error)
+	SummaryForUser(ctx context.Context, userID uuid.UUID, f PriceChangeFilter) (*domain.PriceChangeSummary, error)
 	// Create — пишет одну запись в price_change_log при отправке/skip/fail (Этап 6).
 	Create(ctx context.Context, change PriceChangeCreate) error
 	// DeleteOlderThan — retention 180 дней. Возвращает кол-во удалённых строк.
@@ -159,6 +163,23 @@ type PriceChangeCreate struct {
 	ConstraintHit string
 	Status        string
 	CorrelationID uuid.UUID
+}
+
+// PriceChangeFilter — параметры фильтрации/пагинации для запросов к price_change_log.
+// From/Until должен заполнять сервис (репозиторий обязательных дефолтов не подставляет).
+// Status принимает публичные значения 'success'/'failed'/'skipped'; реализация
+// сама маппит в plan_item_status. SortDir: 'asc'/'desc' (default 'desc').
+// Page/PerPage используются только в ListForUser; для ExportForUser/SummaryForUser игнорируются.
+type PriceChangeFilter struct {
+	ShopID      *uuid.UUID
+	ProductID   *uuid.UUID
+	ExternalSKU string
+	Status      string
+	From        time.Time
+	Until       time.Time
+	Page        int
+	PerPage     int
+	SortDir     string
 }
 
 // PricePlansRepository — план изменений цен (Этап 5).

@@ -22,8 +22,12 @@ function ShopStatusBadge({ status }: { status: ShopStatus }) {
 
 export default function Dashboard() {
   const { data: shops = [] } = useQuery({ queryKey: ['shops'], queryFn: shopsApi.list })
-  const { data: summary } = useQuery({ queryKey: ['summary'], queryFn: auditApi.getSummary })
-  const { data: changes = [] } = useQuery({ queryKey: ['audit'], queryFn: auditApi.listChanges })
+  const { data: summary } = useQuery({ queryKey: ['summary'], queryFn: () => auditApi.getSummary() })
+  const { data: list } = useQuery({
+    queryKey: ['audit', 'dashboard'],
+    queryFn: () => auditApi.listChanges({ perPage: 6 }),
+  })
+  const changes = list?.items ?? []
 
   const activeShops = shops.filter(s => s.status === 'active').length
   const successPct = summary && summary.total_updates > 0

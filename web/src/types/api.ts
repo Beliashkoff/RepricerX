@@ -219,7 +219,38 @@ export interface PriceChange {
   created_at: string
 }
 
+// Audit list
+export interface PriceChangeListParams {
+  page?: number
+  perPage?: number
+  shopId?: string
+  productId?: string
+  externalSku?: string
+  status?: PriceChangeStatus
+  from?: string
+  to?: string
+  sortDir?: SortDir
+}
+
+export interface PriceChangeListResult {
+  items: PriceChange[]
+  pagination: {
+    page: number
+    perPage: number
+    total: number
+  }
+}
+
 // Reports
+export interface SummaryParams {
+  shopId?: string
+  productId?: string
+  externalSku?: string
+  status?: PriceChangeStatus
+  from?: string
+  to?: string
+}
+
 export interface SummaryReport {
   total_updates: number
   successful_updates: number

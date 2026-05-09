@@ -17,6 +17,11 @@ type priceChangeResponse struct {
 	CreatedAt     time.Time `json:"created_at"`
 }
 
+type priceChangeListResponse struct {
+	Items      []priceChangeResponse `json:"items"`
+	Pagination paginationInfo        `json:"pagination"`
+}
+
 type summaryResponse struct {
 	TotalUpdates      int       `json:"total_updates"`
 	SuccessfulUpdates int       `json:"successful_updates"`

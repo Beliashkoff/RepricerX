@@ -18,6 +18,192 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/audit/price-changes": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Пагинированный список изменений цен с фильтрами. Хранение записей — 180 дней.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "audit"
+                ],
+                "summary": "Журнал изменений цен",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID магазина",
+                        "name": "shop_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "product_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Подстрока external_sku товара (ILIKE)",
+                        "name": "external_sku",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "success | failed | skipped",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Начало периода (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Конец периода (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Страница (\u003e=1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Размер страницы (1..200)",
+                        "name": "per_page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc | desc (default desc)",
+                        "name": "sort_dir",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/transport.priceChangeListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/audit/price-changes.csv": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "CSV-выгрузка журнала с теми же фильтрами, что и список. Лимит 10 000 строк — при большем объёме нужно сужать фильтр.",
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "audit"
+                ],
+                "summary": "CSV-экспорт журнала",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID магазина",
+                        "name": "shop_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "product_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Подстрока external_sku товара",
+                        "name": "external_sku",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "success | failed | skipped",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Начало периода (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Конец периода (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc | desc (default desc)",
+                        "name": "sort_dir",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV-файл",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/auth/login": {
             "post": {
                 "description": "Проверяет email и пароль. При успехе создаёт сессию и устанавливает HttpOnly-cookie ` + "`" + `rx_session` + "`" + `.\nАккаунт должен быть активирован (email подтверждён через письмо).\nПосле 5 неудачных попыток аккаунт блокируется на 15 минут.",
@@ -762,6 +948,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/price-plans/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "tags": [
+                    "pricing"
+                ],
+                "summary": "Отменить план",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "plan ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/price-plans/{id}/dispatch": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "tags": [
+                    "pricing"
+                ],
+                "summary": "Запустить отправку плана в маркетплейс",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "plan ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/products": {
             "get": {
                 "security": [
@@ -1281,6 +1525,87 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/reports/summary": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Агрегированные метрики (всего/успех/ошибки/среднее изменение) за параметризуемый период (по умолчанию — 30 дней). Поддерживает те же фильтры, что и список.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reports"
+                ],
+                "summary": "Сводка по изменениям цен",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID магазина",
+                        "name": "shop_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID товара",
+                        "name": "product_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Подстрока external_sku товара",
+                        "name": "external_sku",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "success | failed | skipped",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Начало периода (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Конец периода (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/transport.summaryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/shops": {
             "get": {
                 "security": [
@@ -1727,6 +2052,37 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/shops/{id}/run-now": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "tags": [
+                    "shops"
+                ],
+                "summary": "Запустить пересчёт цен магазина сейчас",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "shop ID (UUID)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -2191,6 +2547,61 @@ const docTemplate = `{
                 }
             }
         },
+        "transport.priceChangeListResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/transport.priceChangeResponse"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/transport.paginationInfo"
+                }
+            }
+        },
+        "transport.priceChangeResponse": {
+            "type": "object",
+            "properties": {
+                "constraint_hit": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "new_price": {
+                    "type": "number"
+                },
+                "old_price": {
+                    "type": "number"
+                },
+                "product_id": {
+                    "type": "string"
+                },
+                "product_name": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "shop_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "strategy_id": {
+                    "type": "string"
+                },
+                "target_price": {
+                    "type": "number"
+                }
+            }
+        },
         "transport.productListResponse": {
             "type": "object",
             "properties": {
@@ -2345,6 +2756,10 @@ const docTemplate = `{
                 "lastCheckedAt": {
                     "type": "string"
                 },
+                "lastRecalcAt": {
+                    "description": "Этап 7",
+                    "type": "string"
+                },
                 "marketplace": {
                     "type": "string",
                     "example": "wb"
@@ -2360,6 +2775,29 @@ const docTemplate = `{
                 "status": {
                     "type": "string",
                     "example": "active"
+                }
+            }
+        },
+        "transport.summaryResponse": {
+            "type": "object",
+            "properties": {
+                "avg_change_pct": {
+                    "type": "number"
+                },
+                "failed_updates": {
+                    "type": "integer"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "successful_updates": {
+                    "type": "integer"
+                },
+                "total_updates": {
+                    "type": "integer"
                 }
             }
         },

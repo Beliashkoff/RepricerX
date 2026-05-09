@@ -100,8 +100,8 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/strategies", strategyH.List)
 		protected.GET("/strategies/:id", strategyH.Get)
 		protected.GET("/audit/price-changes", auditH.ListChanges)
-		protected.GET("/audit/summary", auditH.Summary)
-		protected.GET("/audit/export", auditH.ExportCSV)
+		protected.GET("/audit/price-changes.csv", auditH.ExportCSV)
+		protected.GET("/reports/summary", auditH.Summary)
 		protected.GET("/price-plans", pricingH.ListPlans)
 		protected.GET("/price-plans/:id", pricingH.GetPlan)
 		importPollingLimit := rateLimit(cfg.RateLimiter,

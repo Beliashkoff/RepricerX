@@ -145,13 +145,13 @@ type fakePriceChangesRepo struct {
 	created []repository.PriceChangeCreate
 }
 
-func (r *fakePriceChangesRepo) ListForUser(_ context.Context, _ uuid.UUID, _ int) ([]*domain.PriceChange, error) {
+func (r *fakePriceChangesRepo) ListForUser(_ context.Context, _ uuid.UUID, _ repository.PriceChangeFilter) ([]*domain.PriceChange, int, error) {
+	return nil, 0, nil
+}
+func (r *fakePriceChangesRepo) ExportForUser(_ context.Context, _ uuid.UUID, _ repository.PriceChangeFilter) ([]*domain.PriceChange, error) {
 	return nil, nil
 }
-func (r *fakePriceChangesRepo) ExportForUser(_ context.Context, _ uuid.UUID) ([]*domain.PriceChange, error) {
-	return nil, nil
-}
-func (r *fakePriceChangesRepo) SummaryForUser(_ context.Context, _ uuid.UUID, _, _ time.Time) (*domain.PriceChangeSummary, error) {
+func (r *fakePriceChangesRepo) SummaryForUser(_ context.Context, _ uuid.UUID, _ repository.PriceChangeFilter) (*domain.PriceChangeSummary, error) {
 	return nil, nil
 }
 func (r *fakePriceChangesRepo) Create(_ context.Context, c repository.PriceChangeCreate) error {

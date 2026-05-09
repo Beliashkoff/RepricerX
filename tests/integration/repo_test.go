@@ -869,3 +869,291 @@ func TestPasswordResetTokensRepo_RejectsExpiredAndBlockedUser(t *testing.T) {
 		t.Fatalf("want ErrNotFound for blocked user, got %v", err)
 	}
 }
+
+// --- PriceChangesRepository ---
+
+// seedAuditFixtures создаёт два тенанта (owner с двумя магазинами и продуктами,
+// плюс foreign tenant) и возвращает их идентификаторы.
+type auditFixture struct {
+	UserID     uuid.UUID
+	ShopA      uuid.UUID
+	ShopB      uuid.UUID
+	ProductA   uuid.UUID
+	ProductB   uuid.UUID
+	StrategyID uuid.UUID
+	ForeignT   tenantFixture
+}
+
+func seedAuditFixture(t *testing.T) auditFixture {
+	t.Helper()
+	ctx := context.Background()
+	owner := createTenantFixture(t, "audit-owner")
+	other := createTenantFixture(t, "audit-other")
+
+	// ShopB + второй продукт у того же owner.
+	shopB := uuid.New()
+	productB := uuid.New()
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO shops (id, user_id, marketplace, name, credentials_encrypted, status)
+		VALUES ($1, $2, 'wb', 'audit-owner shop B', '{}'::bytea, 'active')`,
+		shopB, owner.UserID,
+	)
+	if err != nil {
+		t.Fatalf("seed shopB: %v", err)
+	}
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO products (id, shop_id, external_sku, name, current_price, status)
+		VALUES ($1, $2, 'BSKU-001', 'Product B', 200, 'active')`,
+		productB, shopB,
+	)
+	if err != nil {
+		t.Fatalf("seed productB: %v", err)
+	}
+
+	// На ProductA меняем external_sku на детерминированный для поиска.
+	if _, err := testPool.Exec(ctx, `UPDATE products SET external_sku='ASKU-001' WHERE id=$1`, owner.ProductID); err != nil {
+		t.Fatalf("update SKU: %v", err)
+	}
+
+	return auditFixture{
+		UserID:     owner.UserID,
+		ShopA:      owner.ShopID,
+		ShopB:      shopB,
+		ProductA:   owner.ProductID,
+		ProductB:   productB,
+		StrategyID: createStrategy(t, owner.UserID),
+		ForeignT:   other,
+	}
+}
+
+func insertAuditRow(t *testing.T, shopID, productID, strategyID uuid.UUID, status string, oldPrice, newPrice float64, createdAt time.Time) {
+	t.Helper()
+	_, err := testPool.Exec(context.Background(), `
+		INSERT INTO price_change_log
+			(shop_id, product_id, strategy_id, old_price, new_price, target_price, reason, status, correlation_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $5, 'r', $6::plan_item_status, $7, $8)`,
+		shopID, productID, strategyID, oldPrice, newPrice, status, uuid.New(), createdAt,
+	)
+	if err != nil {
+		t.Fatalf("insertAuditRow: %v", err)
+	}
+}
+
+// expandWindow возвращает фильтр с широким окном (10 лет назад / +10 лет вперёд),
+// чтобы дефолты сервиса не вмешивались в проверки на репо-уровне.
+func expandWindow(f repository.PriceChangeFilter) repository.PriceChangeFilter {
+	if f.From.IsZero() {
+		f.From = time.Now().UTC().Add(-10 * 365 * 24 * time.Hour)
+	}
+	if f.Until.IsZero() {
+		f.Until = time.Now().UTC().Add(10 * 365 * 24 * time.Hour)
+	}
+	return f
+}
+
+func TestPriceChangesRepo_List_FiltersAndPagination(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	fx := seedAuditFixture(t)
+	repo := repository.NewPriceChangesRepository(testPool)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	week := now.Add(-7 * 24 * time.Hour)
+
+	// Пять записей: 3 для ProductA (2 success + 1 failed), 1 skipped в магазине B,
+	// 1 — у чужого тенанта (не должна попасть в выдачу owner-а).
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusApplied, 100, 95, now)
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusApplied, 95, 90, now.Add(-time.Minute))
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusFailed, 90, 80, now.Add(-2*time.Minute))
+	insertAuditRow(t, fx.ShopB, fx.ProductB, fx.StrategyID, domain.PlanItemStatusSkipped, 200, 180, week)
+	foreignStrategy := createStrategy(t, fx.ForeignT.UserID)
+	insertAuditRow(t, fx.ForeignT.ShopID, fx.ForeignT.ProductID, foreignStrategy, domain.PlanItemStatusApplied, 50, 45, now)
+
+	// 1) Без фильтра — owner видит свои 4 записи.
+	items, total, err := repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{}))
+	if err != nil {
+		t.Fatalf("ListForUser: %v", err)
+	}
+	if total != 4 || len(items) != 4 {
+		t.Fatalf("unfiltered: total=%d items=%d, want 4/4", total, len(items))
+	}
+
+	// 2) Фильтр по магазину A — три записи, все в shopA.
+	items, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{ShopID: &fx.ShopA}))
+	if err != nil {
+		t.Fatalf("ListForUser shopA: %v", err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("filter shopA: total=%d items=%d, want 3/3", total, len(items))
+	}
+	for _, it := range items {
+		if it.ShopID != fx.ShopA {
+			t.Fatalf("filter shopA leaked shop %s", it.ShopID)
+		}
+	}
+
+	// 3) Фильтр по статусу — один failed.
+	items, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{Status: "failed"}))
+	if err != nil {
+		t.Fatalf("ListForUser status: %v", err)
+	}
+	if total != 1 || items[0].Status != "failed" {
+		t.Fatalf("filter status=failed: total=%d, status=%q", total, items[0].Status)
+	}
+
+	// 4) Фильтр по диапазону дат — окно вокруг now исключает запись недельной давности.
+	items, total, err = repo.ListForUser(ctx, fx.UserID, repository.PriceChangeFilter{
+		From: now.Add(-time.Hour), Until: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("ListForUser dates: %v", err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("filter date range: total=%d items=%d, want 3/3", total, len(items))
+	}
+
+	// 5) Фильтр по external_sku — точное совпадение по продукту A.
+	items, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{ExternalSKU: "ASKU-001"}))
+	if err != nil {
+		t.Fatalf("ListForUser external_sku: %v", err)
+	}
+	if total != 3 {
+		t.Fatalf("filter external_sku exact: total=%d, want 3", total)
+	}
+	for _, it := range items {
+		if it.ProductID != fx.ProductA {
+			t.Fatalf("filter external_sku leaked productID %s", it.ProductID)
+		}
+	}
+
+	// 6) Поиск по подстроке (case-insensitive ILIKE) — оба продукта подходят под "sku".
+	_, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{ExternalSKU: "sku"}))
+	if err != nil {
+		t.Fatalf("ListForUser external_sku substring: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("filter external_sku substring 'sku': total=%d, want 4", total)
+	}
+
+	// 7) Спецсимвол LIKE экранирован: поиск '_' не должен матчиться как wildcard.
+	_, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{ExternalSKU: "_"}))
+	if err != nil {
+		t.Fatalf("ListForUser like-escape: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("filter external_sku '_' (escaped): total=%d, want 0", total)
+	}
+
+	// 8) Пагинация: per_page=1, page=2 → 1 элемент, total=4.
+	items, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{Page: 2, PerPage: 1}))
+	if err != nil {
+		t.Fatalf("ListForUser pagination: %v", err)
+	}
+	if total != 4 || len(items) != 1 {
+		t.Fatalf("pagination: total=%d items=%d, want 4/1", total, len(items))
+	}
+
+	// 9) Сортировка ASC — самая старая запись в shopB должна оказаться первой.
+	items, _, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{SortDir: "asc"}))
+	if err != nil {
+		t.Fatalf("ListForUser asc: %v", err)
+	}
+	if len(items) == 0 || items[0].ShopID != fx.ShopB {
+		t.Fatalf("sort asc: first record shop=%v, want shopB", items[0].ShopID)
+	}
+}
+
+func TestPriceChangesRepo_Export_BypassPagination(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	fx := seedAuditFixture(t)
+	repo := repository.NewPriceChangesRepository(testPool)
+
+	now := time.Now().UTC()
+	for i := 0; i < 5; i++ {
+		insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusApplied, 100, 95, now.Add(-time.Duration(i)*time.Second))
+	}
+
+	// Export получает все 5 строк, игнорируя Page/PerPage в фильтре.
+	items, err := repo.ExportForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{Page: 2, PerPage: 1}))
+	if err != nil {
+		t.Fatalf("ExportForUser: %v", err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("export: len=%d, want 5", len(items))
+	}
+
+	// Фильтр на статус переносится в export.
+	items, err = repo.ExportForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{Status: "failed"}))
+	if err != nil {
+		t.Fatalf("ExportForUser failed-only: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("export status=failed: len=%d, want 0", len(items))
+	}
+}
+
+func TestPriceChangesRepo_Summary_Aggregates(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	fx := seedAuditFixture(t)
+	repo := repository.NewPriceChangesRepository(testPool)
+
+	now := time.Now().UTC()
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusApplied, 100, 90, now)   // -10%
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusApplied, 100, 110, now)  // +10%
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusFailed, 100, 80, now)    // failed → не считается success
+	insertAuditRow(t, fx.ShopA, fx.ProductA, fx.StrategyID, domain.PlanItemStatusSkipped, 100, 100, now)  // 0% и не applied
+
+	summary, err := repo.SummaryForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{}))
+	if err != nil {
+		t.Fatalf("SummaryForUser: %v", err)
+	}
+	if summary.TotalUpdates != 4 || summary.SuccessfulUpdates != 2 || summary.FailedUpdates != 1 {
+		t.Fatalf("summary aggregates: %+v", summary)
+	}
+	// Среднее по 4 строкам: (-10 + 10 + (-20) + 0) / 4 = -5.
+	if summary.AvgChangePct < -5.01 || summary.AvgChangePct > -4.99 {
+		t.Fatalf("summary avg pct = %.4f, want ~-5", summary.AvgChangePct)
+	}
+
+	// PeriodStart/PeriodEnd проксируются из фильтра.
+	from := now.Add(-time.Hour)
+	until := now.Add(time.Hour)
+	summary, err = repo.SummaryForUser(ctx, fx.UserID, repository.PriceChangeFilter{From: from, Until: until})
+	if err != nil {
+		t.Fatalf("SummaryForUser explicit window: %v", err)
+	}
+	if !summary.PeriodStart.Equal(from) || !summary.PeriodEnd.Equal(until) {
+		t.Fatalf("summary period not propagated: start=%v end=%v", summary.PeriodStart, summary.PeriodEnd)
+	}
+}
+
+func TestPriceChangesRepo_TenantIsolation(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	fx := seedAuditFixture(t)
+	repo := repository.NewPriceChangesRepository(testPool)
+
+	// Чужая запись.
+	foreignStrategy := createStrategy(t, fx.ForeignT.UserID)
+	insertAuditRow(t, fx.ForeignT.ShopID, fx.ForeignT.ProductID, foreignStrategy, domain.PlanItemStatusApplied, 100, 90, time.Now().UTC())
+
+	// Owner не должен её увидеть.
+	_, total, err := repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{}))
+	if err != nil {
+		t.Fatalf("ListForUser owner: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("owner sees foreign record: total=%d", total)
+	}
+
+	// Owner не может «достать» чужой shop через фильтр.
+	_, total, err = repo.ListForUser(ctx, fx.UserID, expandWindow(repository.PriceChangeFilter{ShopID: &fx.ForeignT.ShopID}))
+	if err != nil {
+		t.Fatalf("ListForUser foreign shop_id: %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("owner cross-tenant via shop_id: total=%d", total)
+	}
+}

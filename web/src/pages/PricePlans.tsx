@@ -112,6 +112,8 @@ export function PricePlanDetail() {
   })
 
   // Toast при смене статуса (для polling Этапа 6).
+  // При выходе из dispatching инвалидируем audit/summary — worker дописал
+  // строки в price_change_log, и Журнал должен это увидеть на следующем визите.
   const prevStatusRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     const status = data?.plan.status
@@ -124,8 +126,10 @@ export function PricePlanDetail() {
       if (status === 'applied') toast.success(`План применён: ${dispatched} из ${total} цен отправлено`)
       else if (status === 'partial') toast.warning(`Частично применено: ${dispatched} из ${total}`)
       else if (status === 'failed') toast.error('Ошибка отправки в маркетплейс')
+      qc.invalidateQueries({ queryKey: ['audit'] })
+      qc.invalidateQueries({ queryKey: ['summary'] })
     }
-  }, [data])
+  }, [data, qc])
 
   const dispatchMutation = useMutation({
     mutationFn: () => pricingApi.dispatch(id!),
