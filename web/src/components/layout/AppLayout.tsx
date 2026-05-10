@@ -2,9 +2,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import {
   LayoutDashboard, Store, Package, TrendingUp, BarChart2,
-  BookOpen, Settings, LogOut, ChevronRight, Bell, ListChecks,
+  BookOpen, Settings, LogOut, ChevronRight, Bell as BellIcon, ListChecks,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 
 const NAV_ITEMS = [
   { path: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
@@ -14,6 +15,7 @@ const NAV_ITEMS = [
   { path: '/pricing', label: 'Симуляция', icon: BarChart2 },
   { path: '/price-plans', label: 'Планы цен', icon: ListChecks },
   { path: '/audit', label: 'Журнал', icon: BookOpen },
+  { path: '/notifications', label: 'Уведомления', icon: BellIcon },
   { path: '/settings', label: 'Настройки', icon: Settings },
 ]
 
@@ -91,9 +93,7 @@ function TopBar() {
   return (
     <header className="h-14 bg-white border-b border-[#e6e6e6] flex items-center justify-between px-6 gap-3">
       <Logo />
-      <button className="w-9 h-9 rounded-xl bg-[#f5f5f5] flex items-center justify-center text-[#666] hover:bg-[#e8e9eb] transition-colors">
-        <Bell className="h-4 w-4" />
-      </button>
+      <NotificationBell />
       <button
         onClick={() => navigate('/settings')}
         className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#f5f5f5] hover:bg-[#e8e9eb] transition-colors"

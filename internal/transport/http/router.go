@@ -10,6 +10,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/service/auth"
 	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
 	"github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
+	notifiersvc "github.com/Beliashkoff/RepricerX/internal/service/notifier"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -30,14 +31,18 @@ type RouterConfig struct {
 	PricingSvc     *pricingsvc.Service
 	DispatcherSvc  *dispatcher.Service
 	AuditSvc       *auditsvc.Service
+	NotifierSvc    *notifiersvc.Service
 	UsersRepo      repository.UsersRepository
 	Audit          *auditlog.Logger
 	AllowedOrigins []string
 	TrustProxy     bool
 	SecureCookie   bool   // true в prod
 	FrontendURL    string // куда редиректить после email-verify
-	RateLimiter    redislimit.Limiter
-	MaxBodyBytes   int64
+	// TelegramBotStartURL — префикс «https://t.me/<bot>?start=» для UI;
+	// пустая строка → notification handler вернёт 503 на запросы линковки.
+	TelegramBotStartURL string
+	RateLimiter         redislimit.Limiter
+	MaxBodyBytes        int64
 }
 
 // RegisterRoutes регистрирует все HTTP-маршруты приложения на переданном engine.
@@ -59,6 +64,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	strategyH := NewStrategyHandler(cfg.StrategySvc)
 	pricingH := NewPricingHandler(cfg.PricingSvc, cfg.DispatcherSvc)
 	auditH := NewAuditHandler(cfg.AuditSvc)
+	notificationH := NewNotificationHandler(cfg.NotifierSvc, cfg.TelegramBotStartURL)
 
 	// Swagger UI: /swagger/index.html
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -115,6 +121,14 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/imports/:id", importPollingLimit, productH.GetImport)
 		protected.GET("/imports/:id/errors", importPollingLimit, productH.GetImportErrors)
 
+		protected.GET("/notifications", notificationH.List)
+		protected.GET("/notifications/unread-count", notificationH.UnreadCount)
+		protected.GET("/notifications/preferences", notificationH.GetPreferences)
+		protected.GET("/notifications/channel-settings", notificationH.ListChannelSettings)
+		protected.GET("/notifications/telegram/status", notificationH.TelegramStatus)
+		protected.GET("/notifications/webhooks", notificationH.ListWebhooks)
+		protected.GET("/notifications/:id", notificationH.Get)
+
 		mutating := protected.Group("", requireCSRF)
 		{
 			mutating.POST("/auth/logout", authH.Logout)
@@ -145,6 +159,17 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			mutating.POST("/price-plans/:id/dispatch", pricingH.Dispatch)
 			mutating.POST("/price-plans/:id/cancel", pricingH.CancelPlan)
 			mutating.POST("/shops/:id/run-now", pricingH.RunNow)
+
+			mutating.PATCH("/notifications/:id/read", notificationH.MarkRead)
+			mutating.POST("/notifications/read-all", notificationH.MarkAllRead)
+			mutating.DELETE("/notifications/:id", notificationH.Delete)
+			mutating.PUT("/notifications/preferences", notificationH.UpdatePreferences)
+			mutating.PUT("/notifications/channel-settings/:channel", notificationH.UpdateChannelSettings)
+			mutating.POST("/notifications/telegram/link-token", notificationH.IssueTelegramToken)
+			mutating.DELETE("/notifications/telegram", notificationH.UnlinkTelegram)
+			mutating.POST("/notifications/webhooks", notificationH.CreateWebhook)
+			mutating.DELETE("/notifications/webhooks/:id", notificationH.DeleteWebhook)
+			mutating.POST("/notifications/webhooks/:id/test", notificationH.TestWebhook)
 		}
 	}
 }

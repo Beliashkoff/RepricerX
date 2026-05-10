@@ -44,6 +44,13 @@ type Service struct {
 	secret            string
 	factories         map[string]MarketplaceFactory
 	importMaxAttempts int
+	notifier          NotifierEmitter
+}
+
+// NotifierEmitter — минимальный интерфейс к notifier для эмиссии события
+// импорта. Дублируется здесь, чтобы не импортировать notifier-пакет.
+type NotifierEmitter interface {
+	NotifyImportCompleted(ctx context.Context, userID, importID, shopID uuid.UUID, total, added, updated, skipped, failed int)
 }
 
 type Option func(*Service)
@@ -54,6 +61,11 @@ func WithImportMaxAttempts(maxAttempts int) Option {
 			s.importMaxAttempts = maxAttempts
 		}
 	}
+}
+
+// WithNotifier — опциональный хук уведомлений после ExecuteImportJob.
+func WithNotifier(n NotifierEmitter) Option {
+	return func(s *Service) { s.notifier = n }
 }
 
 type CreateInput struct {
@@ -319,6 +331,10 @@ func (s *Service) ExecuteImportJob(ctx context.Context, job *domain.BackgroundJo
 	}
 	result.Status = status
 	result.ResultJSON = importJobResultJSON(status, len(skus), upsertResult.Added, upsertResult.Updated, skipped, failed)
+	if s.notifier != nil {
+		s.notifier.NotifyImportCompleted(ctx, payload.RequestedByUserID, payload.ImportID, payload.ShopID,
+			len(skus), upsertResult.Added, upsertResult.Updated, skipped, failed)
+	}
 	return result
 }
 

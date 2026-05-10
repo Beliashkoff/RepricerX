@@ -1,0 +1,13 @@
+Сводка событий RepricerX
+
+{{.PeriodStart}} → {{.PeriodEnd}}. Всего: {{.Count}}.
+
+{{range .Items}}
+[{{.SeverityLabel}}] {{.Title}}  ({{.CreatedAt}})
+{{if .Body}}{{.Body}}{{end}}
+
+{{end}}{{if .OpenURL}}Все уведомления: {{.OpenURL}}
+
+{{end}}--
+RepricerX — сервис управления ценами на маркетплейсах.
+{{if .PreferencesURL}}Настройки расписания: {{.PreferencesURL}}{{end}}

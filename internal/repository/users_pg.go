@@ -81,6 +81,39 @@ func (r *usersPg) UpdateStatus(ctx context.Context, id uuid.UUID, status string)
 	return err
 }
 
+func (r *usersPg) ListAdminIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := r.db.Query(ctx, `SELECT id FROM users WHERE is_admin = TRUE AND status = $1`, domain.UserStatusActive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *usersPg) SetAdmin(ctx context.Context, id uuid.UUID, isAdmin bool) error {
+	tag, err := r.db.Exec(ctx, `UPDATE users SET is_admin = $1 WHERE id = $2`, isAdmin, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *usersPg) SetTelegramMutedUntil(ctx context.Context, id uuid.UUID, until *time.Time) error {
+	_, err := r.db.Exec(ctx, `UPDATE users SET tg_muted_until = $1 WHERE id = $2`, until, id)
+	return err
+}
+
 func (r *usersPg) scanUser(ctx context.Context, query string, args ...any) (*domain.User, error) {
 	row := r.db.QueryRow(ctx, query, args...)
 	u := &domain.User{}

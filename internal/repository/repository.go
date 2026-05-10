@@ -9,6 +9,7 @@ import (
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // Sentinel-ошибки — используются сервисами для ветвления без type assertion.
@@ -31,6 +32,12 @@ type UsersRepository interface {
 	RegisterFailedLogin(ctx context.Context, id uuid.UUID, newCount int, lockoutUntil *time.Time) error
 	ResetFailedLogin(ctx context.Context, id uuid.UUID) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	// ListAdminIDs — для system-scoped уведомлений (упавший cron, глобальные ошибки).
+	ListAdminIDs(ctx context.Context) ([]uuid.UUID, error)
+	// SetAdmin вызывается из BootstrapAdmin при старте api по env BOOTSTRAP_ADMIN_EMAIL.
+	SetAdmin(ctx context.Context, id uuid.UUID, isAdmin bool) error
+	// SetTelegramMutedUntil — обновление окна mute из обработчика команды /mute в cmd/bot.
+	SetTelegramMutedUntil(ctx context.Context, id uuid.UUID, until *time.Time) error
 }
 
 // SessionsRepository — операции с таблицей sessions.
@@ -384,4 +391,122 @@ type BackgroundJobsRepository interface {
 	// и других generic-джобов. EnqueueProductImport остаётся специализированным
 	// (под import_log + дедуп cooldown).
 	Enqueue(ctx context.Context, in BackgroundJobEnqueue) (*domain.BackgroundJob, error)
+}
+
+// NotificationCreate — параметры создания нового события для пользователя.
+// CorrelationID опционально; если задан — поможет дедупу и трассировке.
+type NotificationCreate struct {
+	UserID        uuid.UUID
+	EventType     string
+	Severity      string
+	Title         string
+	Body          string
+	Data          []byte // JSON
+	ShopID        *uuid.UUID
+	PlanID        *uuid.UUID
+	CorrelationID *uuid.UUID
+}
+
+// NotificationListFilter — постраничный фильтр для GET /api/notifications.
+type NotificationListFilter struct {
+	EventType  string
+	Severity   string
+	UnreadOnly bool
+	From       time.Time
+	Until      time.Time
+	ShopID     *uuid.UUID
+	Page       int
+	PerPage    int
+}
+
+type NotificationsRepository interface {
+	Create(ctx context.Context, tx pgx.Tx, in NotificationCreate) (*domain.Notification, error)
+	GetByIDForUser(ctx context.Context, userID, id uuid.UUID) (*domain.Notification, error)
+	ListForUser(ctx context.Context, userID uuid.UUID, f NotificationListFilter) (items []*domain.Notification, total int, err error)
+	CountUnread(ctx context.Context, userID uuid.UUID) (int, error)
+	MarkRead(ctx context.Context, userID, id uuid.UUID) error
+	MarkAllRead(ctx context.Context, userID uuid.UUID) (int64, error)
+	Delete(ctx context.Context, userID, id uuid.UUID) error
+	// ExistsRecentByDedupe — для дедупликации (например, integration_error по
+	// (user_id, event_type, shop_id) за окно). Реализация JOIN'ит data->>'shop_id'.
+	ExistsRecentByDedupe(ctx context.Context, userID uuid.UUID, eventType string, shopID *uuid.UUID, since time.Time) (bool, error)
+	// DeleteOlderThan — retention уведомлений.
+	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+type NotificationPreferencesRepository interface {
+	List(ctx context.Context, userID uuid.UUID) ([]*domain.NotificationPreference, error)
+	IsEnabled(ctx context.Context, userID uuid.UUID, eventType, channel string, defaultEnabled bool) (bool, error)
+	Upsert(ctx context.Context, prefs []domain.NotificationPreference) error
+}
+
+type NotificationDeliveryCreate struct {
+	NotificationID uuid.UUID
+	Channel        string
+	Status         string
+}
+
+// PendingDigestRow — строка для DigestFlushTick.
+type PendingDigestRow struct {
+	UserID  uuid.UUID
+	Channel string
+}
+
+type NotificationDeliveriesRepository interface {
+	Create(ctx context.Context, tx pgx.Tx, in NotificationDeliveryCreate) (*domain.NotificationDelivery, error)
+	ListByNotification(ctx context.Context, notificationID uuid.UUID) ([]*domain.NotificationDelivery, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status, lastError string, sentAt *time.Time) error
+	AttachJob(ctx context.Context, id, jobID uuid.UUID) error
+	IncrementAttempts(ctx context.Context, id uuid.UUID) error
+	// ListPendingDigests возвращает уникальные пары (user_id, channel) с накопленными
+	// pending_digest строками. Используется DigestFlushTick.
+	ListPendingDigestPairs(ctx context.Context, channel string) ([]PendingDigestRow, error)
+	// LockPendingDigestForUser атомарно переводит pending_digest → queued_digest
+	// для пары (user, channel) и возвращает ID-шники переведённых строк.
+	// Использует FOR UPDATE SKIP LOCKED для multi-replica safety.
+	LockPendingDigestForUser(ctx context.Context, userID uuid.UUID, channel string) ([]uuid.UUID, error)
+	// LoadDigestNotifications возвращает notifications + deliveries по списку delivery-id
+	// для рендера дайджеста.
+	LoadByIDs(ctx context.Context, deliveryIDs []uuid.UUID) ([]*domain.NotificationDelivery, []*domain.Notification, error)
+}
+
+// UserChannelSettingsCreate — параметры upsert для GetOrCreate.
+type UserChannelSettingsUpdate struct {
+	DigestWindowMinutes *int
+	DigestMinSeverity   *string
+	QuietHoursStart     *int
+	QuietHoursEnd       *int
+	ClearQuietHours     bool
+}
+
+type UserChannelSettingsRepository interface {
+	List(ctx context.Context, userID uuid.UUID) ([]*domain.UserChannelSettings, error)
+	Get(ctx context.Context, userID uuid.UUID, channel string) (*domain.UserChannelSettings, error)
+	Upsert(ctx context.Context, userID uuid.UUID, channel string, in UserChannelSettingsUpdate) (*domain.UserChannelSettings, error)
+	MarkDigestSent(ctx context.Context, userID uuid.UUID, channel string, at time.Time) error
+}
+
+type TelegramLinksRepository interface {
+	GetByUserID(ctx context.Context, userID uuid.UUID) (*domain.TelegramLink, error)
+	GetByToken(ctx context.Context, token string) (*domain.TelegramLink, error)
+	GetByChatID(ctx context.Context, chatID int64) (*domain.TelegramLink, error)
+	IssueToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error
+	Confirm(ctx context.Context, token string, chatID int64, username string) (*domain.TelegramLink, error)
+	Unlink(ctx context.Context, userID uuid.UUID) error
+	UnlinkByChatID(ctx context.Context, chatID int64) error
+}
+
+type WebhookCreate struct {
+	URL         string
+	Secret      string
+	Description string
+}
+
+type WebhooksRepository interface {
+	List(ctx context.Context, userID uuid.UUID) ([]*domain.Webhook, error)
+	GetByIDForUser(ctx context.Context, userID, id uuid.UUID) (*domain.Webhook, error)
+	Create(ctx context.Context, userID uuid.UUID, in WebhookCreate) (*domain.Webhook, error)
+	SetEnabled(ctx context.Context, userID, id uuid.UUID, enabled bool) error
+	Delete(ctx context.Context, userID, id uuid.UUID) error
+	ListEnabledForUser(ctx context.Context, userID uuid.UUID) ([]*domain.Webhook, error)
 }

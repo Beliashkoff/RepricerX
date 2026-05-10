@@ -133,7 +133,7 @@ func (s *Service) ExecuteDispatchJob(ctx context.Context, job *domain.Background
 		elapsed := time.Since(startedAt)
 
 		// Лог попытки в integration_log независимо от исхода.
-		s.logIntegration(ctx, p.ShopID, callErr, elapsed)
+		s.logIntegration(ctx, p.RequestedByUserID, p.ShopID, callErr, elapsed)
 
 		switch {
 		case errors.Is(callErr, integration.ErrUnauthorized):
@@ -176,7 +176,33 @@ func (s *Service) ExecuteDispatchJob(ctx context.Context, job *domain.Background
 		}
 	}
 
-	return s.finalizePlanStatus(ctx, p.PlanID)
+	if err := s.finalizePlanStatus(ctx, p.PlanID); err != nil {
+		return err
+	}
+	s.notifyDispatchCompleted(ctx, p.RequestedByUserID, p.PlanID, p.ShopID)
+	return nil
+}
+
+// notifyDispatchCompleted — вычитывает финальные counts и эмитит событие.
+// Вызывается строго после finalizePlanStatus.
+func (s *Service) notifyDispatchCompleted(ctx context.Context, userID, planID, shopID uuid.UUID) {
+	if s.notifier == nil {
+		return
+	}
+	counts, err := s.plans.CountItemsByStatus(ctx, planID)
+	if err != nil {
+		return
+	}
+	plan, _, err := s.plans.GetByIDForUser(ctx, userID, planID)
+	if err != nil {
+		return
+	}
+	s.notifier.NotifyDispatchCompleted(ctx, userID, planID, shopID, plan.Status,
+		counts[domain.PlanItemStatusDispatched],
+		counts[domain.PlanItemStatusFailed],
+		counts[domain.PlanItemStatusSkipped],
+		counts[domain.PlanItemStatusPending],
+	)
 }
 
 // isPlanCancelled — лёгкий SELECT status; используется между chunks.
@@ -189,9 +215,10 @@ func (s *Service) isPlanCancelled(ctx context.Context, userID, planID uuid.UUID)
 }
 
 // logIntegration — одна запись в integration_log на chunk.
+// userID может быть uuid.Nil — в этом случае notifier не дёргаем.
 //
 //nolint:unparam // elapsed зарезервирован для будущей метрики duration_ms
-func (s *Service) logIntegration(ctx context.Context, shopID uuid.UUID, callErr error, _ time.Duration) {
+func (s *Service) logIntegration(ctx context.Context, userID, shopID uuid.UUID, callErr error, _ time.Duration) {
 	var (
 		httpStatus *int
 		errorText  string
@@ -221,6 +248,26 @@ func (s *Service) logIntegration(ctx context.Context, shopID uuid.UUID, callErr 
 		CorrelationID: corr,
 		CreatedAt:     s.now(),
 	})
+
+	// Уведомление при 4xx/5xx (200 — нет смысла сообщать).
+	if s.notifier != nil && userID != uuid.Nil {
+		shouldNotify := false
+		st := 0
+		if httpStatus != nil {
+			st = *httpStatus
+		}
+		switch {
+		case st == 401, st == 403, st == 429, st >= 500:
+			shouldNotify = true
+		case st == 0 && callErr != nil:
+			// Сетевая ошибка / 5xx, не классифицированная клиентом.
+			shouldNotify = true
+			st = 0
+		}
+		if shouldNotify {
+			s.notifier.NotifyIntegrationError(ctx, userID, shopID, domain.IntegrationOpPriceDispatch, st, errorText)
+		}
+	}
 }
 
 // chunkItems — делит items по chunkSize.

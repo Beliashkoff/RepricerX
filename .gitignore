@@ -54,8 +54,3 @@ web/.env.local
 .vscode/
 
 # Local agent settings
-/.claude
-/.codex
-AGENT.md
-AGENTS.md
-CLAUDE.md

@@ -54,6 +54,7 @@ import (
 	authsvc "github.com/Beliashkoff/RepricerX/internal/service/auth"
 	competitorsvc "github.com/Beliashkoff/RepricerX/internal/service/competitor"
 	dispatchersvc "github.com/Beliashkoff/RepricerX/internal/service/dispatcher"
+	notifiersvc "github.com/Beliashkoff/RepricerX/internal/service/notifier"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	productsvc "github.com/Beliashkoff/RepricerX/internal/service/product"
 	shopsvc "github.com/Beliashkoff/RepricerX/internal/service/shop"
@@ -106,6 +107,12 @@ func main() {
 	assignmentsRepo := repository.NewStrategyAssignmentsRepository(pool)
 	priceChangesRepo := repository.NewPriceChangesRepository(pool)
 	competitorsRepo := repository.NewProductCompetitorsRepository(pool)
+	notificationsRepo := repository.NewNotificationsRepository(pool)
+	notificationPrefsRepo := repository.NewNotificationPreferencesRepository(pool)
+	notificationDeliveriesRepo := repository.NewNotificationDeliveriesRepository(pool)
+	channelSettingsRepo := repository.NewUserChannelSettingsRepository(pool)
+	telegramLinksRepo := repository.NewTelegramLinksRepository(pool)
+	webhooksRepo := repository.NewWebhooksRepository(pool)
 
 	audit := auditlog.New(log)
 
@@ -146,10 +153,32 @@ func main() {
 			return ozon.NewClient(shopID, b, limiter)
 		},
 	}
+	notifierService := notifiersvc.New(notifiersvc.Deps{
+		Pool:          pool,
+		Notifications: notificationsRepo,
+		Preferences:   notificationPrefsRepo,
+		Deliveries:    notificationDeliveriesRepo,
+		ChannelSet:    channelSettingsRepo,
+		TelegramRepo:  telegramLinksRepo,
+		WebhooksRepo:  webhooksRepo,
+		Jobs:          jobsRepo,
+		Users:         usersRepo,
+		Log:           log,
+	})
+	frontendURL := cfg.VerificationURLBase
+	if u, err := url.Parse(cfg.VerificationURLBase); err == nil {
+		frontendURL = u.Scheme + "://" + u.Host
+	}
+
+	notifierService.Register(notifiersvc.NewInAppChannel())
+	notifierService.Register(notifiersvc.NewEmailChannel(m, usersRepo, frontendURL))
+	// Telegram/Webhook каналы регистрируются ниже (Этап E/F).
+
 	dispatcherService := dispatchersvc.New(
 		plansRepo, productsRepo, priceChangesRepo, intLogRepo,
 		shopsRepo, jobsRepo,
 		cfg.AppSecretKey, dispatcherFactories,
+		dispatchersvc.WithNotifier(notifierService),
 	)
 
 	pricingService := pricingsvc.New(productsRepo, strategiesRepo,
@@ -160,6 +189,7 @@ func main() {
 		pricingsvc.WithAssignments(assignmentsRepo),
 		pricingsvc.WithPriceSync(cfg.AppSecretKey, pricingMarketplaceFactories, 60*time.Minute),
 		pricingsvc.WithDispatcher(dispatcherService),
+		pricingsvc.WithNotifier(notifierService),
 	)
 	auditService := auditsvc.New(priceChangesRepo)
 
@@ -170,7 +200,7 @@ func main() {
 		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
 			return ozon.NewClient(shopID, b, limiter)
 		},
-	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts))
+	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts), productsvc.WithNotifier(notifierService))
 
 	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, resetRepo, m, audit, authsvc.Config{
 		IdleTTL:          cfg.SessionIdleTTL,
@@ -192,28 +222,25 @@ func main() {
 	r.GET("/healthz", health.healthz)
 	r.GET("/ready", health.ready)
 
-	// FrontendURL — только origin (scheme + host), без пути.
-	frontendURL := cfg.VerificationURLBase
-	if u, err := url.Parse(cfg.VerificationURLBase); err == nil {
-		frontendURL = u.Scheme + "://" + u.Host
-	}
-
 	transport.RegisterRoutes(r, transport.RouterConfig{
-		AuthSvc:        svc,
-		ShopSvc:        shopService,
-		ProductSvc:     productService,
-		CompetitorSvc:  competitorService,
-		StrategySvc:    strategyService,
-		PricingSvc:     pricingService,
-		DispatcherSvc:  dispatcherService,
-		AuditSvc:       auditService,
-		UsersRepo:      usersRepo,
-		Audit:          audit,
-		AllowedOrigins: cfg.AllowedOrigins,
-		TrustProxy:     cfg.TrustProxyHeaders,
-		SecureCookie:   cfg.IsProd(),
-		FrontendURL:    frontendURL,
-		RateLimiter:    httpLimiter,
+		AuthSvc:             svc,
+		ShopSvc:             shopService,
+		ProductSvc:          productService,
+		CompetitorSvc:       competitorService,
+		StrategySvc:         strategyService,
+		PricingSvc:          pricingService,
+		DispatcherSvc:       dispatcherService,
+		AuditSvc:            auditService,
+		NotifierSvc:         notifierService,
+		UsersRepo:           usersRepo,
+		Audit:               audit,
+		AllowedOrigins:      cfg.AllowedOrigins,
+		TrustProxy:          cfg.TrustProxyHeaders,
+		SecureCookie:        cfg.IsProd(),
+		FrontendURL:         frontendURL,
+		TelegramBotStartURL: cfg.TelegramBotStartURL,
+		RateLimiter:         httpLimiter,
+		MaxBodyBytes:        cfg.MaxBodyBytes,
 	})
 
 	// Этап 7: cleanup переехал в cmd/scheduler (robfig/cron, тик "0 * * * *").

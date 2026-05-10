@@ -66,10 +66,18 @@ type Service struct {
 	shops            repository.ShopsRepository
 	assignments      repository.StrategyAssignmentsRepository
 	dispatcher       DispatcherTrigger
+	notifier         NotifierEmitter
 	competitorMaxAge time.Duration
 	priceMaxAge      time.Duration // sync через ListSKUs если old; 0 = sync выключен
 	secret           string        // для расшифровки credentials_encrypted
 	factories        map[string]MarketplaceFactory
+}
+
+// NotifierEmitter — минимальный интерфейс к notifier.Service. Дублируется,
+// чтобы не импортировать notifier из pricing (циклы).
+type NotifierEmitter interface {
+	NotifyRecalcCompleted(ctx context.Context, userID, planID, shopID uuid.UUID, total, calculated, skipped, errs int)
+	NotifyConstraintHit(ctx context.Context, userID, planID, shopID uuid.UUID, minPrice, maxPrice, maxChangePct, other int)
 }
 
 type Option func(*Service)
@@ -99,6 +107,11 @@ func WithAssignments(a repository.StrategyAssignmentsRepository) Option {
 // EnqueueDispatch для немедленной отправки plan-а в МП.
 func WithDispatcher(d DispatcherTrigger) Option {
 	return func(s *Service) { s.dispatcher = d }
+}
+
+// WithNotifier — опциональный хук уведомлений.
+func WithNotifier(n NotifierEmitter) Option {
+	return func(s *Service) { s.notifier = n }
 }
 
 // WithPriceSync включает автоматическую синхронизацию current_price товаров

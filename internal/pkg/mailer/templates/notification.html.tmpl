@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>{{.Title}} — RepricerX</title>
+</head>
+<body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom: 16px;">
+    <tr>
+      <td style="padding: 4px 10px; border-radius: 4px; font-size: 12px; color: white; background: {{.SeverityColor}};">
+        {{.SeverityLabel}}
+      </td>
+    </tr>
+  </table>
+
+  <h2 style="margin: 0 0 12px 0; color: #111827;">{{.Title}}</h2>
+
+  {{if .Body}}<p style="color: #374151; line-height: 1.5; white-space: pre-line;">{{.Body}}</p>{{end}}
+
+  {{if .OpenURL}}
+  <p style="text-align: center; margin: 30px 0;">
+    <a href="{{.OpenURL}}"
+       style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-size: 16px;">
+      Открыть в RepricerX
+    </a>
+  </p>
+  {{end}}
+
+  <hr style="margin-top: 40px; border: none; border-top: 1px solid #e5e7eb;">
+  <p style="color: #6b7280; font-size: 12px;">
+    RepricerX — сервис управления ценами на маркетплейсах.
+    {{if .PreferencesURL}}
+    Настроить уведомления: <a href="{{.PreferencesURL}}" style="color: #6b7280;">в личном кабинете</a>.
+    {{end}}
+  </p>
+</body>
+</html>

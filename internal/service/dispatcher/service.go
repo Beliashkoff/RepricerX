@@ -39,6 +39,20 @@ type Service struct {
 	factories      map[string]MarketplaceFactory
 	chunkSize      int
 	now            func() time.Time
+	notifier       NotifierEmitter
+}
+
+// NotifierEmitter — минимальный интерфейс к notifier.Service (избегаем
+// циклического импорта). Реализуется *notifier.Service.
+type NotifierEmitter interface {
+	NotifyDispatchCompleted(ctx context.Context, userID, planID, shopID uuid.UUID, planStatus string, dispatched, failed, skipped, pending int)
+	NotifyIntegrationError(ctx context.Context, userID, shopID uuid.UUID, operation string, httpStatus int, errText string)
+}
+
+// WithNotifier подключает notifier для эмиссии событий. Если не задан —
+// dispatcher работает молча (для тестов и чистого пути).
+func WithNotifier(n NotifierEmitter) Option {
+	return func(s *Service) { s.notifier = n }
 }
 
 type Option func(*Service)

@@ -149,6 +149,18 @@ func (r *fakeUsersRepo) UpdateStatus(_ context.Context, id uuid.UUID, status str
 	return nil
 }
 
+func (r *fakeUsersRepo) ListAdminIDs(_ context.Context) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (r *fakeUsersRepo) SetAdmin(_ context.Context, _ uuid.UUID, _ bool) error {
+	return nil
+}
+
+func (r *fakeUsersRepo) SetTelegramMutedUntil(_ context.Context, _ uuid.UUID, _ *time.Time) error {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 
 type fakeSessionsRepo struct {

@@ -49,6 +49,13 @@ type Config struct {
 	WorkerJobTimeout      time.Duration
 	WorkerMaxAttempts     int
 	WorkerShutdownTimeout time.Duration
+
+	// Notifier
+	TelegramBotToken    string // токен бота; пусто = TG-канал отключён
+	TelegramBotStartURL string // префикс «https://t.me/<bot>?start=» для UI
+
+	// HTTP
+	MaxBodyBytes int64 // лимит размера тела запроса в байтах
 }
 
 func Load() (*Config, error) {
@@ -120,6 +127,16 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("WORKER_SHUTDOWN_TIMEOUT: %w", err)
 	}
+
+	cfg.TelegramBotToken = strings.TrimSpace(getEnv("TELEGRAM_BOT_TOKEN", ""))
+	cfg.TelegramBotStartURL = strings.TrimSpace(getEnv("TELEGRAM_BOT_START_URL", ""))
+
+	maxBodyStr := getEnv("MAX_BODY_BYTES", "1048576") // 1 MiB по умолчанию
+	maxBody, err := strconv.ParseInt(maxBodyStr, 10, 64)
+	if err != nil || maxBody <= 0 {
+		return nil, fmt.Errorf("MAX_BODY_BYTES должен быть положительным числом")
+	}
+	cfg.MaxBodyBytes = maxBody
 
 	switch cfg.MailerMode {
 	case "log":

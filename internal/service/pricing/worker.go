@@ -69,6 +69,37 @@ func (s *Service) ExecuteRecalcJob(ctx context.Context, job *domain.BackgroundJo
 		return fmt.Errorf("recalc worker: mark calculated: %w", err)
 	}
 
+	// Хук уведомлений: итог пересчёта + сводка constraint_hit.
+	if s.notifier != nil {
+		var calculated, skipped, errs, minHit, maxHit, changeHit, otherHit int
+		for _, it := range items {
+			switch it.Status {
+			case domain.PlanItemStatusApplied, domain.PlanItemStatusPending:
+				calculated++
+			case domain.PlanItemStatusSkipped:
+				skipped++
+			case domain.PlanItemStatusFailed:
+				errs++
+			}
+			switch it.ConstraintHit {
+			case domain.ConstraintMinPrice:
+				minHit++
+			case domain.ConstraintMaxPrice:
+				maxHit++
+			case domain.ConstraintMaxChangePct:
+				changeHit++
+			case "":
+				// no constraint
+			default:
+				otherHit++
+			}
+		}
+		s.notifier.NotifyRecalcCompleted(ctx, payload.RequestedByUserID, payload.PlanID, payload.ShopID,
+			len(items), calculated, skipped, errs)
+		s.notifier.NotifyConstraintHit(ctx, payload.RequestedByUserID, payload.PlanID, payload.ShopID,
+			minHit, maxHit, changeHit, otherHit)
+	}
+
 	// Auto-dispatch hook (Этап 6): если у магазина включён auto_update_enabled —
 	// сразу enqueue dispatch-job. Best-effort: ошибки логируем, не падаем.
 	if s.dispatcher != nil && s.shops != nil {

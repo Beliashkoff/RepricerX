@@ -11,7 +11,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,8 +21,10 @@ import (
 
 	"github.com/Beliashkoff/RepricerX/internal/config"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/repository"
 	"github.com/Beliashkoff/RepricerX/internal/scheduler"
+	notifiersvc "github.com/Beliashkoff/RepricerX/internal/service/notifier"
 	pricingsvc "github.com/Beliashkoff/RepricerX/internal/service/pricing"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -56,6 +60,36 @@ func main() {
 		pricingsvc.WithAssignments(repository.NewStrategyAssignmentsRepository(pool)),
 	)
 
+	usersRepo := repository.NewUsersRepository(pool)
+	notifierSvc := notifiersvc.New(notifiersvc.Deps{
+		Pool:          pool,
+		Notifications: repository.NewNotificationsRepository(pool),
+		Preferences:   repository.NewNotificationPreferencesRepository(pool),
+		Deliveries:    repository.NewNotificationDeliveriesRepository(pool),
+		ChannelSet:    repository.NewUserChannelSettingsRepository(pool),
+		TelegramRepo:  repository.NewTelegramLinksRepository(pool),
+		WebhooksRepo:  repository.NewWebhooksRepository(pool),
+		Jobs:          repository.NewBackgroundJobsRepository(pool),
+		Users:         usersRepo,
+		Log:           log,
+	})
+	// Регистрация каналов нужна только для Deliver-вызовов; в scheduler-бинаре
+	// сам notifier ничего не доставляет (это делает worker), так что регистрация
+	// тут не обязательна. Однако для FlushDigests нужен Email — без него flush
+	// просто не отметит severity-фильтры. Регистрируем минимум, что есть.
+	var schedMailer mailer.Mailer
+	if cfg.MailerMode == "smtp" {
+		schedMailer = mailer.NewSmtpMailer(cfg.SMTPHost, fmt.Sprintf("%d", cfg.SMTPPort), cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom)
+	} else {
+		schedMailer = mailer.NewLogMailer(log)
+	}
+	frontendURL := cfg.VerificationURLBase
+	if u, err := url.Parse(cfg.VerificationURLBase); err == nil {
+		frontendURL = u.Scheme + "://" + u.Host
+	}
+	notifierSvc.Register(notifiersvc.NewInAppChannel())
+	notifierSvc.Register(notifiersvc.NewEmailChannel(schedMailer, usersRepo, frontendURL))
+
 	schedSvc := scheduler.New(scheduler.Deps{
 		Pool:           pool,
 		Shops:          repository.NewShopsRepository(pool),
@@ -67,6 +101,7 @@ func main() {
 		Competitors:    repository.NewProductCompetitorsRepository(pool),
 		Jobs:           repository.NewBackgroundJobsRepository(pool),
 		Pricing:        pricingSvc,
+		Digest:         notifierSvc,
 		Log:            log,
 	})
 

@@ -50,8 +50,9 @@ services:
       PORT: "8080"
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-false}
-      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
       MAILER_MODE: ${MAILER_MODE:-log}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_START_URL: ${TELEGRAM_BOT_START_URL:-}
       VERIFICATION_URL_BASE: ${VERIFICATION_URL_BASE:-http://localhost:5173/verify}
       PASSWORD_RESET_URL_BASE: ${PASSWORD_RESET_URL_BASE:-http://localhost:5173/reset-password}
     depends_on:

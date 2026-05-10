@@ -28,6 +28,7 @@ const (
 	LockIDCleanupHourly       int64 = 0x52704901 // "RepricerX cleanup-hourly"
 	LockIDCompetitorRefresh   int64 = 0x52704902 // "RepricerX competitor-refresh"
 	LockIDStalePlanCleanup    int64 = 0x52704903 // "RepricerX stale-plan-cleanup"
+	LockIDDigestFlush         int64 = 0x52704904 // "RepricerX digest-flush"
 )
 
 // ReleaseFunc снимает lock и возвращает соединение в pool.

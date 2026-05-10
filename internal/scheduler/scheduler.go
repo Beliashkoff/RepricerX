@@ -32,6 +32,13 @@ type PricingTrigger interface {
 	Recalculate(ctx context.Context, userID, shopID uuid.UUID, productIDs []uuid.UUID) (*domain.PricePlan, *domain.BackgroundJob, error)
 }
 
+// DigestFlusher — минимальный интерфейс для DigestFlushTick (Этап D).
+// Реализуется notifier.Service. В отдельный интерфейс — чтобы scheduler
+// не зависел от пакета notifier на уровне типов.
+type DigestFlusher interface {
+	FlushDigests(ctx context.Context, channel string, now time.Time) (int, error)
+}
+
 type Service struct {
 	c       *cron.Cron
 	log     *slog.Logger
@@ -46,6 +53,7 @@ type Service struct {
 	competitors  repository.ProductCompetitorsRepository
 	jobs         repository.BackgroundJobsRepository
 	pricing      PricingTrigger
+	digest       DigestFlusher
 
 	now func() time.Time
 
@@ -54,6 +62,7 @@ type Service struct {
 	specCompetitorRefresh string // "*/30 * * * *"
 	specCleanupHourly     string // "0 * * * *"
 	specStalePlan         string // "0 4 * * *"
+	specDigestFlush       string // "*/5 * * * *"
 
 	// Параметры
 	competitorMaxAge      time.Duration // 30 минут
@@ -95,6 +104,7 @@ type Deps struct {
 	Competitors   repository.ProductCompetitorsRepository
 	Jobs          repository.BackgroundJobsRepository
 	Pricing       PricingTrigger
+	Digest        DigestFlusher // optional; nil → DigestFlushTick не регистрируется
 	Log           *slog.Logger
 }
 
@@ -113,11 +123,13 @@ func New(deps Deps, opts ...Option) *Service {
 		competitors:           deps.Competitors,
 		jobs:                  deps.Jobs,
 		pricing:               deps.Pricing,
+		digest:                deps.Digest,
 		now:                   func() time.Time { return time.Now().UTC() },
 		specScheduledRecalc:   "* * * * *",
 		specCompetitorRefresh: "*/30 * * * *",
 		specCleanupHourly:     "0 * * * *",
 		specStalePlan:         "0 4 * * *",
+		specDigestFlush:       "*/5 * * * *",
 		competitorMaxAge:      30 * time.Minute,
 		competitorBatchSize:   1000,
 		stalePlanMaxAge:       24 * time.Hour,
@@ -149,6 +161,11 @@ func (s *Service) Start(ctx context.Context) error {
 	if _, err := s.c.AddFunc(s.specStalePlan, func() { s.StalePlanCleanupTick(ctx) }); err != nil {
 		return fmt.Errorf("scheduler: add stalePlanCleanup: %w", err)
 	}
+	if s.digest != nil {
+		if _, err := s.c.AddFunc(s.specDigestFlush, func() { s.DigestFlushTick(ctx) }); err != nil {
+			return fmt.Errorf("scheduler: add digestFlush: %w", err)
+		}
+	}
 
 	s.c.Start()
 	s.started = true
@@ -157,6 +174,7 @@ func (s *Service) Start(ctx context.Context) error {
 		"competitorRefresh", s.specCompetitorRefresh,
 		"cleanupHourly", s.specCleanupHourly,
 		"stalePlan", s.specStalePlan,
+		"digestFlush", boolToStr(s.digest != nil, s.specDigestFlush, "disabled"),
 	)
 	return nil
 }
@@ -339,6 +357,45 @@ func (s *Service) CleanupHourlyTick(ctx context.Context) {
 	} else if n > 0 {
 		s.log.Info("cleanupHourly: deleted price_change_log", "count", n)
 	}
+}
+
+// DigestFlushTick — раз в 5 минут (по умолчанию) собирает накопленные
+// 'pending_digest' доставки и enqueue-ит digest-job. Логика дедупликации,
+// окна и quiet-hours живёт в notifier.Service (FlushDigests).
+func (s *Service) DigestFlushTick(ctx context.Context) {
+	if s.digest == nil {
+		return
+	}
+	tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for _, ch := range []string{
+		"email", // только email пока поддерживает дайджест; telegram/webhook — instant
+	} {
+		got, release, err := dblock.TryAcquire(tickCtx, s.pool, dblock.LockIDDigestFlush)
+		if err != nil {
+			s.log.Error("digestFlush: lock", "channel", ch, "error", err)
+			continue
+		}
+		if !got {
+			continue
+		}
+		n, err := s.digest.FlushDigests(tickCtx, ch, s.now())
+		_ = release()
+		if err != nil {
+			s.log.Error("digestFlush", "channel", ch, "error", err)
+			continue
+		}
+		if n > 0 {
+			s.log.Info("digestFlush: enqueued", "channel", ch, "count", n)
+		}
+	}
+}
+
+func boolToStr(cond bool, t, f string) string {
+	if cond {
+		return t
+	}
+	return f
 }
 
 // StalePlanCleanupTick — раз в сутки cancel-ит "зависшие" планы старше 24 часов.
