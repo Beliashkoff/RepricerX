@@ -41,12 +41,14 @@ jobs:
             echo "API_IMAGE=${image_ns}/api:${IMAGE_SHA}"
             echo "WORKER_IMAGE=${image_ns}/worker:${IMAGE_SHA}"
             echo "SCHEDULER_IMAGE=${image_ns}/scheduler:${IMAGE_SHA}"
+            echo "BOT_IMAGE=${image_ns}/bot:${IMAGE_SHA}"
             echo "WEB_IMAGE=${image_ns}/web:${IMAGE_SHA}"
           } >> "$GITHUB_ENV"
           {
             echo "api_image=${image_ns}/api:${IMAGE_SHA}"
             echo "worker_image=${image_ns}/worker:${IMAGE_SHA}"
             echo "scheduler_image=${image_ns}/scheduler:${IMAGE_SHA}"
+            echo "bot_image=${image_ns}/bot:${IMAGE_SHA}"
             echo "web_image=${image_ns}/web:${IMAGE_SHA}"
           } >> "$GITHUB_OUTPUT"
 
@@ -57,6 +59,7 @@ jobs:
           API_IMAGE: ${{ steps.images.outputs.api_image }}
           WORKER_IMAGE: ${{ steps.images.outputs.worker_image }}
           SCHEDULER_IMAGE: ${{ steps.images.outputs.scheduler_image }}
+          BOT_IMAGE: ${{ steps.images.outputs.bot_image }}
           WEB_IMAGE: ${{ steps.images.outputs.web_image }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
@@ -64,7 +67,7 @@ jobs:
           host: ${{ secrets.PROD_SSH_HOST }}
           username: ${{ secrets.PROD_SSH_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
-          envs: IMAGE_SHA,API_IMAGE,WORKER_IMAGE,SCHEDULER_IMAGE,WEB_IMAGE,GHCR_TOKEN,GHCR_USER
+          envs: IMAGE_SHA,API_IMAGE,WORKER_IMAGE,SCHEDULER_IMAGE,BOT_IMAGE,WEB_IMAGE,GHCR_TOKEN,GHCR_USER
           script: |
             set -euo pipefail
             cd /home/repricer/RepricerX
@@ -78,13 +81,13 @@ jobs:
               cp .deploy/current.env .deploy/previous.env
             fi
 
-            export API_IMAGE WORKER_IMAGE SCHEDULER_IMAGE WEB_IMAGE
+            export API_IMAGE WORKER_IMAGE SCHEDULER_IMAGE BOT_IMAGE WEB_IMAGE
 
             echo "==> login to GHCR"
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
             echo "==> pull immutable images"
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml pull api worker scheduler web
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml pull api worker scheduler bot web
 
             docker logout ghcr.io
 
@@ -97,7 +100,7 @@ jobs:
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up --no-build --no-deps --exit-code-from credbackfill credbackfill
 
             echo "==> start application"
-            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d --no-build api worker scheduler web nginx
+            docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d --no-build api worker scheduler bot web nginx
 
             echo "==> waiting for API health..."
             timeout 60 bash -c 'until docker exec repricer_api wget -qO- http://localhost:8080/healthz > /dev/null 2>&1; do sleep 2; done'
@@ -107,6 +110,7 @@ jobs:
             API_IMAGE=${API_IMAGE}
             WORKER_IMAGE=${WORKER_IMAGE}
             SCHEDULER_IMAGE=${SCHEDULER_IMAGE}
+            BOT_IMAGE=${BOT_IMAGE}
             WEB_IMAGE=${WEB_IMAGE}
             EOF
 

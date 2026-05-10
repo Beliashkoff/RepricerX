@@ -75,7 +75,6 @@ func (r *userChannelSettingsPg) Upsert(ctx context.Context, userID uuid.UUID, ch
 		if in.QuietHoursEnd != nil {
 			sets = append(sets, fmt.Sprintf("quiet_hours_end = $%d", idx))
 			args = append(args, *in.QuietHoursEnd)
-			idx++
 		}
 	}
 	sets = append(sets, "updated_at = NOW()")
@@ -123,7 +122,6 @@ func (r *userChannelSettingsPg) Upsert(ctx context.Context, userID uuid.UUID, ch
 		insertCols = append(insertCols, "quiet_hours_end")
 		insertArgs = append(insertArgs, *in.QuietHoursEnd)
 		insertVals = append(insertVals, fmt.Sprintf("$%d", idx))
-		idx++
 	}
 	insertQuery := fmt.Sprintf(`
 		INSERT INTO user_channel_settings (%s)

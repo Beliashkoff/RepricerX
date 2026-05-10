@@ -85,7 +85,7 @@ func (c *WebhookChannel) deliverOne(ctx context.Context, w *domain.Webhook, n *d
 	if err != nil {
 		return fmt.Errorf("webhook post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("webhook status %d: %s", resp.StatusCode, string(respBody))

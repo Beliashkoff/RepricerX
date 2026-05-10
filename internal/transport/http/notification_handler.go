@@ -22,9 +22,9 @@ import (
 )
 
 type notificationHandler struct {
-	svc        *notifiersvc.Service
+	svc         *notifiersvc.Service
 	telegramURL string // префикс https://t.me/<botname>?start=
-	httpClient *http.Client
+	httpClient  *http.Client
 }
 
 // NewNotificationHandler — конструктор. telegramBotURL — пустая строка, если
@@ -407,7 +407,7 @@ func (h *notificationHandler) TestWebhook(c *gin.Context) {
 		c.JSON(http.StatusOK, webhookTestResponse{Error: err.Error()})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	c.JSON(http.StatusOK, webhookTestResponse{
 		HTTPStatus: resp.StatusCode,

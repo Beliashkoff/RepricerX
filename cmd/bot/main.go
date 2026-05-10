@@ -164,7 +164,7 @@ func (b *telegramAPI) getUpdates(ctx context.Context, offset int) ([]telegramUpd
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("telegram status %d", resp.StatusCode)
 	}
@@ -193,7 +193,7 @@ func (b *telegramAPI) sendMessage(ctx context.Context, chatID int64, text string
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("telegram send status %d", resp.StatusCode)
 	}
