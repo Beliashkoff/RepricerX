@@ -80,7 +80,7 @@ func (c *TelegramChannel) sendMessage(ctx context.Context, chatID int64, text st
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("telegram send: %s", c.safeError(err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -91,6 +91,13 @@ func (c *TelegramChannel) sendMessage(ctx context.Context, chatID int64, text st
 		return fmt.Errorf("telegram status %d: %s", resp.StatusCode, body.Description)
 	}
 	return nil
+}
+
+func (c *TelegramChannel) safeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.ReplaceAll(err.Error(), c.token, "<redacted>")
 }
 
 func telegramText(n *domain.Notification, frontend string) string {

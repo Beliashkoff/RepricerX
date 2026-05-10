@@ -81,7 +81,7 @@ func main() {
 	for ctx.Err() == nil {
 		updates, err := bot.getUpdates(ctx, offset)
 		if err != nil {
-			log.Warn("telegram getUpdates", "error", err)
+			log.Warn("telegram getUpdates", "error", bot.safeError(err))
 			sleep(ctx, 2*time.Second)
 			continue
 		}
@@ -198,6 +198,13 @@ func (b *telegramAPI) sendMessage(ctx context.Context, chatID int64, text string
 		return fmt.Errorf("telegram send status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (b *telegramAPI) safeError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return strings.ReplaceAll(err.Error(), b.token, "<redacted>")
 }
 
 func sleep(ctx context.Context, d time.Duration) {
