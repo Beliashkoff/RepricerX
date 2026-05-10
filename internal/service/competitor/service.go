@@ -42,20 +42,37 @@ type LookupResult struct {
 type Service struct {
 	repo       repository.ProductCompetitorsRepository
 	ozon       OzonPriceLookup
+	notifier   NotifierEmitter
 	now        func() time.Time
 	maxURLSize int
 }
 
-func New(repo repository.ProductCompetitorsRepository, ozon OzonPriceLookup) *Service {
+type Option func(*Service)
+
+type NotifierEmitter interface {
+	NotifyCompetitorPriceDropped(ctx context.Context, userID, productID uuid.UUID, externalSKU string, oldPrice, newPrice float64)
+	NotifyCompetitorAppeared(ctx context.Context, userID, productID uuid.UUID, externalSKU, competitorURL string, price float64)
+	NotifyMedianShifted(ctx context.Context, userID, productID uuid.UUID, externalSKU string, oldMedian, newMedian float64)
+}
+
+func WithNotifier(n NotifierEmitter) Option {
+	return func(s *Service) { s.notifier = n }
+}
+
+func New(repo repository.ProductCompetitorsRepository, ozon OzonPriceLookup, opts ...Option) *Service {
 	if ozon == nil {
 		ozon = NewHTTPBasedOzonLookup()
 	}
-	return &Service{
+	s := &Service{
 		repo:       repo,
 		ozon:       ozon,
 		now:        func() time.Time { return time.Now().UTC() },
 		maxURLSize: 2048,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 type CreateInput struct {
@@ -176,6 +193,12 @@ func (s *Service) Refresh(ctx context.Context, userID, competitorID uuid.UUID) (
 			check.RawSource = result.Source
 		}
 	}
+	var before repository.CompetitorPriceStats
+	if lookupErr == nil && result.Price != nil && s.notifier != nil {
+		if stats, err := s.repo.StatsBefore(ctx, item.ProductID, check.CheckedAt); err == nil {
+			before = stats
+		}
+	}
 	updated, saveErr := s.repo.SaveCheckResult(ctx, competitorID, check)
 	if saveErr != nil {
 		return nil, fmt.Errorf("competitor save refresh: %w", saveErr)
@@ -183,7 +206,42 @@ func (s *Service) Refresh(ctx context.Context, userID, competitorID uuid.UUID) (
 	if lookupErr != nil {
 		return updated, ErrRefreshFailed
 	}
+	if result.Price != nil {
+		s.emitSignals(ctx, userID, item, updated, before)
+	}
 	return updated, nil
+}
+
+func (s *Service) emitSignals(ctx context.Context, userID uuid.UUID, beforeItem, updated *domain.ProductCompetitor, before repository.CompetitorPriceStats) {
+	if s.notifier == nil || updated == nil || updated.LastPrice == nil {
+		return
+	}
+	info, err := s.repo.SignalContext(ctx, userID, updated.ProductID)
+	if err != nil {
+		return
+	}
+	after, err := s.repo.CurrentStats(ctx, updated.ProductID)
+	if err != nil || after.Min == nil {
+		return
+	}
+	if before.Min == nil {
+		if info.CurrentPrice > 0 && *after.Min < info.CurrentPrice {
+			s.notifier.NotifyCompetitorAppeared(ctx, userID, updated.ProductID, info.ExternalSKU, updated.CompetitorURL, *after.Min)
+		}
+		return
+	}
+	if *after.Min < *before.Min*0.95 {
+		s.notifier.NotifyCompetitorPriceDropped(ctx, userID, updated.ProductID, info.ExternalSKU, *before.Min, *after.Min)
+	}
+	if beforeItem.LastCheckedAt == nil && *updated.LastPrice < info.CurrentPrice {
+		s.notifier.NotifyCompetitorAppeared(ctx, userID, updated.ProductID, info.ExternalSKU, updated.CompetitorURL, *updated.LastPrice)
+	}
+	if before.Median != nil && after.Median != nil && *before.Median > 0 {
+		delta := math.Abs(*after.Median-*before.Median) / *before.Median
+		if delta > 0.10 {
+			s.notifier.NotifyMedianShifted(ctx, userID, updated.ProductID, info.ExternalSKU, *before.Median, *after.Median)
+		}
+	}
 }
 
 type normalizedTarget struct {

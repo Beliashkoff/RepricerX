@@ -39,10 +39,18 @@ type DigestFlusher interface {
 	FlushDigests(ctx context.Context, channel string, now time.Time) (int, error)
 }
 
+type Notifier interface {
+	NotifyScheduledJobFailed(ctx context.Context, jobName, errText string)
+	NotifyUserScheduledJobFailed(ctx context.Context, userID uuid.UUID, jobName, errText string)
+	NotifyBusinessWarningNoCost(ctx context.Context, userID, productID uuid.UUID, externalSKU, productName string)
+	NotifyBusinessWarningNoCompetitors(ctx context.Context, userID, productID uuid.UUID, externalSKU, productName string)
+	NotifyBusinessWarningPriceDrift(ctx context.Context, userID, productID uuid.UUID, externalSKU string, expected, actual float64)
+}
+
 type Service struct {
-	c       *cron.Cron
-	log     *slog.Logger
-	pool    *pgxpool.Pool
+	c    *cron.Cron
+	log  *slog.Logger
+	pool *pgxpool.Pool
 
 	shops        repository.ShopsRepository
 	sessions     repository.SessionsRepository
@@ -54,6 +62,7 @@ type Service struct {
 	jobs         repository.BackgroundJobsRepository
 	pricing      PricingTrigger
 	digest       DigestFlusher
+	notifier     Notifier
 
 	now func() time.Time
 
@@ -63,11 +72,12 @@ type Service struct {
 	specCleanupHourly     string // "0 * * * *"
 	specStalePlan         string // "0 4 * * *"
 	specDigestFlush       string // "*/5 * * * *"
+	specBusinessWarnings  string // "0 */6 * * *"
 
 	// Параметры
-	competitorMaxAge      time.Duration // 30 минут
-	competitorBatchSize   int           // 1000
-	stalePlanMaxAge       time.Duration // 24 часа
+	competitorMaxAge    time.Duration // 30 минут
+	competitorBatchSize int           // 1000
+	stalePlanMaxAge     time.Duration // 24 часа
 
 	mu      sync.Mutex
 	started bool
@@ -94,18 +104,19 @@ func WithSpecs(scheduledRecalc, competitorRefresh, cleanupHourly, stalePlan stri
 }
 
 type Deps struct {
-	Pool         *pgxpool.Pool
-	Shops        repository.ShopsRepository
-	Sessions     repository.SessionsRepository
-	Verifications repository.EmailVerificationsRepository
+	Pool           *pgxpool.Pool
+	Shops          repository.ShopsRepository
+	Sessions       repository.SessionsRepository
+	Verifications  repository.EmailVerificationsRepository
 	PasswordResets repository.PasswordResetTokensRepository
 	IntegrationLog repository.IntegrationLogRepository
-	PriceChanges  repository.PriceChangesRepository
-	Competitors   repository.ProductCompetitorsRepository
-	Jobs          repository.BackgroundJobsRepository
-	Pricing       PricingTrigger
-	Digest        DigestFlusher // optional; nil → DigestFlushTick не регистрируется
-	Log           *slog.Logger
+	PriceChanges   repository.PriceChangesRepository
+	Competitors    repository.ProductCompetitorsRepository
+	Jobs           repository.BackgroundJobsRepository
+	Pricing        PricingTrigger
+	Digest         DigestFlusher // optional; nil → DigestFlushTick не регистрируется
+	Notifier       Notifier      // optional
+	Log            *slog.Logger
 }
 
 func New(deps Deps, opts ...Option) *Service {
@@ -124,12 +135,14 @@ func New(deps Deps, opts ...Option) *Service {
 		jobs:                  deps.Jobs,
 		pricing:               deps.Pricing,
 		digest:                deps.Digest,
+		notifier:              deps.Notifier,
 		now:                   func() time.Time { return time.Now().UTC() },
 		specScheduledRecalc:   "* * * * *",
 		specCompetitorRefresh: "*/30 * * * *",
 		specCleanupHourly:     "0 * * * *",
 		specStalePlan:         "0 4 * * *",
 		specDigestFlush:       "*/5 * * * *",
+		specBusinessWarnings:  "0 */6 * * *",
 		competitorMaxAge:      30 * time.Minute,
 		competitorBatchSize:   1000,
 		stalePlanMaxAge:       24 * time.Hour,
@@ -166,6 +179,11 @@ func (s *Service) Start(ctx context.Context) error {
 			return fmt.Errorf("scheduler: add digestFlush: %w", err)
 		}
 	}
+	if s.notifier != nil {
+		if _, err := s.c.AddFunc(s.specBusinessWarnings, func() { s.BusinessWarningsTick(ctx) }); err != nil {
+			return fmt.Errorf("scheduler: add businessWarnings: %w", err)
+		}
+	}
 
 	s.c.Start()
 	s.started = true
@@ -175,6 +193,7 @@ func (s *Service) Start(ctx context.Context) error {
 		"cleanupHourly", s.specCleanupHourly,
 		"stalePlan", s.specStalePlan,
 		"digestFlush", boolToStr(s.digest != nil, s.specDigestFlush, "disabled"),
+		"businessWarnings", boolToStr(s.notifier != nil, s.specBusinessWarnings, "disabled"),
 	)
 	return nil
 }
@@ -207,6 +226,7 @@ func (s *Service) ScheduledRecalcTick(ctx context.Context) {
 	shops, err := s.shops.ListSchedulable(tickCtx)
 	if err != nil {
 		s.log.Error("scheduledRecalc: list shops", "error", err)
+		s.notifySystemFailure(tickCtx, "scheduledRecalc", err)
 		return
 	}
 	if len(shops) == 0 {
@@ -236,6 +256,7 @@ func (s *Service) ScheduledRecalcTick(ctx context.Context) {
 		ok, err := s.shops.TouchLastRecalcAt(tickCtx, shop.ID, shop.LastRecalcAt)
 		if err != nil {
 			s.log.Error("scheduledRecalc: touch", "shop_id", shop.ID, "error", err)
+			s.notifyUserFailure(tickCtx, shop.UserID, "scheduledRecalc", err)
 			continue
 		}
 		if !ok {
@@ -245,6 +266,7 @@ func (s *Service) ScheduledRecalcTick(ctx context.Context) {
 		if _, _, err := s.pricing.Recalculate(tickCtx, shop.UserID, shop.ID, nil); err != nil {
 			s.log.Error("scheduledRecalc: enqueue",
 				"shop_id", shop.ID, "user_id", shop.UserID, "error", err)
+			s.notifyUserFailure(tickCtx, shop.UserID, "scheduledRecalc", err)
 			continue
 		}
 		enqueued++
@@ -264,6 +286,7 @@ func (s *Service) CompetitorRefreshTick(ctx context.Context) {
 	got, release, err := dblock.TryAcquire(tickCtx, s.pool, dblock.LockIDCompetitorRefresh)
 	if err != nil {
 		s.log.Error("competitorRefresh: lock", "error", err)
+		s.notifySystemFailure(tickCtx, "competitorRefresh", err)
 		return
 	}
 	if !got {
@@ -273,6 +296,7 @@ func (s *Service) CompetitorRefreshTick(ctx context.Context) {
 	defer func() {
 		if err := release(); err != nil {
 			s.log.Error("competitorRefresh: release lock", "error", err)
+			s.notifySystemFailure(tickCtx, "competitorRefresh", err)
 		}
 	}()
 
@@ -280,6 +304,7 @@ func (s *Service) CompetitorRefreshTick(ctx context.Context) {
 	stale, err := s.competitors.ListStaleForRefresh(tickCtx, since, s.competitorBatchSize)
 	if err != nil {
 		s.log.Error("competitorRefresh: list stale", "error", err)
+		s.notifySystemFailure(tickCtx, "competitorRefresh", err)
 		return
 	}
 	if len(stale) == 0 {
@@ -301,6 +326,7 @@ func (s *Service) CompetitorRefreshTick(ctx context.Context) {
 		}); err != nil {
 			s.log.Error("competitorRefresh: enqueue",
 				"competitor_id", c.CompetitorID, "error", err)
+			s.notifyUserFailure(tickCtx, c.UserID, "competitorRefresh", err)
 			continue
 		}
 		enqueued++
@@ -318,6 +344,7 @@ func (s *Service) CleanupHourlyTick(ctx context.Context) {
 	got, release, err := dblock.TryAcquire(tickCtx, s.pool, dblock.LockIDCleanupHourly)
 	if err != nil {
 		s.log.Error("cleanupHourly: lock", "error", err)
+		s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 		return
 	}
 	if !got {
@@ -327,6 +354,7 @@ func (s *Service) CleanupHourlyTick(ctx context.Context) {
 	defer func() {
 		if err := release(); err != nil {
 			s.log.Error("cleanupHourly: release lock", "error", err)
+			s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 		}
 	}()
 
@@ -334,26 +362,31 @@ func (s *Service) CleanupHourlyTick(ctx context.Context) {
 
 	if n, err := s.sessions.DeleteExpired(tickCtx); err != nil {
 		s.log.Error("cleanupHourly: sessions", "error", err)
+		s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 	} else if n > 0 {
 		s.log.Info("cleanupHourly: deleted sessions", "count", n)
 	}
 	if n, err := s.verRepo.DeleteExpired(tickCtx); err != nil {
 		s.log.Error("cleanupHourly: email_verifications", "error", err)
+		s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 	} else if n > 0 {
 		s.log.Info("cleanupHourly: deleted email_verifications", "count", n)
 	}
 	if n, err := s.resetRepo.DeleteExpired(tickCtx); err != nil {
 		s.log.Error("cleanupHourly: password_resets", "error", err)
+		s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 	} else if n > 0 {
 		s.log.Info("cleanupHourly: deleted password_resets", "count", n)
 	}
 	if n, err := s.intLog.DeleteOlderThan(tickCtx, now.Add(-30*24*time.Hour)); err != nil {
 		s.log.Error("cleanupHourly: integration_log", "error", err)
+		s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 	} else if n > 0 {
 		s.log.Info("cleanupHourly: deleted integration_log", "count", n)
 	}
 	if n, err := s.priceChanges.DeleteOlderThan(tickCtx, now.Add(-180*24*time.Hour)); err != nil {
 		s.log.Error("cleanupHourly: price_change_log", "error", err)
+		s.notifySystemFailure(tickCtx, "cleanupHourly", err)
 	} else if n > 0 {
 		s.log.Info("cleanupHourly: deleted price_change_log", "count", n)
 	}
@@ -374,6 +407,7 @@ func (s *Service) DigestFlushTick(ctx context.Context) {
 		got, release, err := dblock.TryAcquire(tickCtx, s.pool, dblock.LockIDDigestFlush)
 		if err != nil {
 			s.log.Error("digestFlush: lock", "channel", ch, "error", err)
+			s.notifySystemFailure(tickCtx, "digestFlush", err)
 			continue
 		}
 		if !got {
@@ -383,12 +417,143 @@ func (s *Service) DigestFlushTick(ctx context.Context) {
 		_ = release()
 		if err != nil {
 			s.log.Error("digestFlush", "channel", ch, "error", err)
+			s.notifySystemFailure(tickCtx, "digestFlush", err)
 			continue
 		}
 		if n > 0 {
 			s.log.Info("digestFlush: enqueued", "channel", ch, "count", n)
 		}
 	}
+}
+
+// BusinessWarningsTick emits seller-facing warnings for data states that make
+// repricing unsafe or misleading. Each event is deduped by notifier for 24h.
+func (s *Service) BusinessWarningsTick(ctx context.Context) {
+	if s.notifier == nil {
+		return
+	}
+	tickCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	s.emitNoCostWarnings(tickCtx)
+	s.emitNoCompetitorWarnings(tickCtx)
+	s.emitPriceDriftWarnings(tickCtx)
+}
+
+func (s *Service) emitNoCostWarnings(ctx context.Context) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT sh.user_id, p.id, p.external_sku, p.name
+		FROM products p
+		JOIN shops sh ON sh.id = p.shop_id
+		JOIN strategy_assignments sa ON sa.product_id = p.id
+		JOIN strategies st ON st.id = sa.strategy_id
+		WHERE p.status = 'active'
+		  AND st.enabled = TRUE
+		  AND st.type::text = $1
+		  AND p.cost_price IS NULL
+		ORDER BY p.updated_at DESC
+		LIMIT 200`, domain.StrategyTypeMinMarginPct)
+	if err != nil {
+		s.log.Error("businessWarnings: noCost", "error", err)
+		s.notifySystemFailure(ctx, "businessWarnings", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID, productID uuid.UUID
+		var sku, name string
+		if err := rows.Scan(&userID, &productID, &sku, &name); err != nil {
+			s.log.Error("businessWarnings: scan noCost", "error", err)
+			continue
+		}
+		s.notifier.NotifyBusinessWarningNoCost(ctx, userID, productID, sku, name)
+	}
+}
+
+func (s *Service) emitNoCompetitorWarnings(ctx context.Context) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT sh.user_id, p.id, p.external_sku, p.name
+		FROM products p
+		JOIN shops sh ON sh.id = p.shop_id
+		JOIN strategy_assignments sa ON sa.product_id = p.id
+		JOIN strategies st ON st.id = sa.strategy_id
+		WHERE p.status = 'active'
+		  AND st.enabled = TRUE
+		  AND st.type::text IN ($1, $2)
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM product_competitors pc
+		    WHERE pc.product_id = p.id
+		      AND pc.last_status = 'ok'
+		      AND pc.last_price IS NOT NULL
+		      AND pc.last_checked_at >= NOW() - INTERVAL '24 hours'
+		  )
+		ORDER BY p.updated_at DESC
+		LIMIT 200`, domain.StrategyTypeBelowMedianPct, domain.StrategyTypeMinCompetitorPlusStep)
+	if err != nil {
+		s.log.Error("businessWarnings: noCompetitors", "error", err)
+		s.notifySystemFailure(ctx, "businessWarnings", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID, productID uuid.UUID
+		var sku, name string
+		if err := rows.Scan(&userID, &productID, &sku, &name); err != nil {
+			s.log.Error("businessWarnings: scan noCompetitors", "error", err)
+			continue
+		}
+		s.notifier.NotifyBusinessWarningNoCompetitors(ctx, userID, productID, sku, name)
+	}
+}
+
+func (s *Service) emitPriceDriftWarnings(ctx context.Context) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT sh.user_id, p.id, p.external_sku, latest.new_price::float8, p.current_price::float8
+		FROM products p
+		JOIN shops sh ON sh.id = p.shop_id
+		JOIN LATERAL (
+			SELECT pcl.new_price
+			FROM price_change_log pcl
+			WHERE pcl.product_id = p.id
+			ORDER BY pcl.created_at DESC
+			LIMIT 1
+		) latest ON TRUE
+		WHERE p.status = 'active'
+		  AND latest.new_price > 0
+		  AND ABS(p.current_price - latest.new_price) / latest.new_price > 0.05
+		ORDER BY p.updated_at DESC
+		LIMIT 200`)
+	if err != nil {
+		s.log.Error("businessWarnings: priceDrift", "error", err)
+		s.notifySystemFailure(ctx, "businessWarnings", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID, productID uuid.UUID
+		var sku string
+		var expected, actual float64
+		if err := rows.Scan(&userID, &productID, &sku, &expected, &actual); err != nil {
+			s.log.Error("businessWarnings: scan priceDrift", "error", err)
+			continue
+		}
+		s.notifier.NotifyBusinessWarningPriceDrift(ctx, userID, productID, sku, expected, actual)
+	}
+}
+
+func (s *Service) notifySystemFailure(ctx context.Context, jobName string, err error) {
+	if s.notifier == nil || err == nil {
+		return
+	}
+	s.notifier.NotifyScheduledJobFailed(ctx, jobName, err.Error())
+}
+
+func (s *Service) notifyUserFailure(ctx context.Context, userID uuid.UUID, jobName string, err error) {
+	if s.notifier == nil || err == nil || userID == uuid.Nil {
+		return
+	}
+	s.notifier.NotifyUserScheduledJobFailed(ctx, userID, jobName, err.Error())
 }
 
 func boolToStr(cond bool, t, f string) string {
@@ -407,6 +572,7 @@ func (s *Service) StalePlanCleanupTick(ctx context.Context) {
 	got, release, err := dblock.TryAcquire(tickCtx, s.pool, dblock.LockIDStalePlanCleanup)
 	if err != nil {
 		s.log.Error("stalePlanCleanup: lock", "error", err)
+		s.notifySystemFailure(tickCtx, "stalePlanCleanup", err)
 		return
 	}
 	if !got {
@@ -422,6 +588,7 @@ func (s *Service) StalePlanCleanupTick(ctx context.Context) {
 		  AND created_at < $1`, cutoff)
 	if err != nil {
 		s.log.Error("stalePlanCleanup: update", "error", err)
+		s.notifySystemFailure(tickCtx, "stalePlanCleanup", err)
 		return
 	}
 	if rows := tag.RowsAffected(); rows > 0 {

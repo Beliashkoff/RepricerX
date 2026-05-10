@@ -188,6 +188,17 @@ func (r *notificationsPg) ExistsRecentByDedupe(ctx context.Context, userID uuid.
 	return exists, err
 }
 
+func (r *notificationsPg) ExistsRecentByCorrelation(ctx context.Context, userID uuid.UUID, eventType string, correlationID uuid.UUID, since time.Time) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM notifications
+			WHERE user_id = $1 AND event_type = $2
+			  AND correlation_id = $3 AND created_at >= $4
+		)`, userID, eventType, correlationID, since).Scan(&exists)
+	return exists, err
+}
+
 func (r *notificationsPg) DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
 	tag, err := r.db.Exec(ctx, `DELETE FROM notifications WHERE created_at < $1`, cutoff)
 	if err != nil {

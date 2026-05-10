@@ -140,7 +140,13 @@ func (s *Service) Emit(ctx context.Context, userID uuid.UUID, e Event) error {
 
 	if e.DedupeWindow > 0 {
 		since := s.now().Add(-e.DedupeWindow)
-		exists, err := s.deps.Notifications.ExistsRecentByDedupe(ctx, userID, e.Type, e.ShopID, since)
+		var exists bool
+		var err error
+		if e.CorrelationID != nil {
+			exists, err = s.deps.Notifications.ExistsRecentByCorrelation(ctx, userID, e.Type, *e.CorrelationID, since)
+		} else {
+			exists, err = s.deps.Notifications.ExistsRecentByDedupe(ctx, userID, e.Type, e.ShopID, since)
+		}
 		if err != nil {
 			s.deps.Log.Warn("notifier: dedupe check failed", "err", err, "event_type", e.Type)
 		} else if exists {
@@ -201,7 +207,10 @@ func (s *Service) Emit(ctx context.Context, userID uuid.UUID, e Event) error {
 		instant := true
 		if ch != domain.NotificationChannelInApp {
 			settings := settingsByChannel[ch]
-			if shouldDigest(settings, e.Severity) {
+			if settings != nil && settings.DigestWindowMinutes > 0 && !severityMeetsMin(e.Severity, settings.DigestMinSeverity) {
+				status = domain.NotificationDeliveryStatusSkipped
+				instant = false
+			} else if shouldDigest(settings, e.Severity) {
 				status = domain.NotificationDeliveryStatusPendingDigest
 				instant = false
 			}
@@ -228,6 +237,13 @@ func (s *Service) Emit(ctx context.Context, userID uuid.UUID, e Event) error {
 			if err := s.deps.Deliveries.UpdateStatus(ctx, p.delivery.ID,
 				domain.NotificationDeliveryStatusSent, "", ptrTime(s.now())); err != nil {
 				s.deps.Log.Warn("notifier: mark in_app sent", "err", err)
+			}
+			continue
+		}
+		if p.delivery.Status == domain.NotificationDeliveryStatusSkipped {
+			if err := s.deps.Deliveries.UpdateStatus(ctx, p.delivery.ID,
+				domain.NotificationDeliveryStatusSkipped, "below digest_min_severity", ptrTime(s.now())); err != nil {
+				s.deps.Log.Warn("notifier: mark skipped", "err", err)
 			}
 			continue
 		}

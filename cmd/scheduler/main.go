@@ -102,6 +102,7 @@ func main() {
 		Jobs:           repository.NewBackgroundJobsRepository(pool),
 		Pricing:        pricingSvc,
 		Digest:         notifierSvc,
+		Notifier:       notifierSvc,
 		Log:            log,
 	})
 

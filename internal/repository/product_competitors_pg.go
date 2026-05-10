@@ -211,6 +211,86 @@ func (r *productCompetitorsPg) LatestFreshPrice(ctx context.Context, userID, pro
 	return &price, nil
 }
 
+func (r *productCompetitorsPg) SignalContext(ctx context.Context, userID, productID uuid.UUID) (CompetitorSignalContext, error) {
+	var out CompetitorSignalContext
+	err := r.db.QueryRow(ctx, `
+		SELECT p.id, s.user_id, p.external_sku, p.current_price::float8
+		FROM products p
+		JOIN shops s ON s.id = p.shop_id
+		WHERE p.id = $1 AND s.user_id = $2`, productID, userID).
+		Scan(&out.ProductID, &out.UserID, &out.ExternalSKU, &out.CurrentPrice)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, ErrNotFound
+		}
+		return out, err
+	}
+	return out, nil
+}
+
+func (r *productCompetitorsPg) StatsBefore(ctx context.Context, productID uuid.UUID, before time.Time) (CompetitorPriceStats, error) {
+	rows, err := r.db.Query(ctx, `
+		WITH latest AS (
+			SELECT DISTINCT ON (cps.competitor_id) cps.price::float8 AS price
+			FROM competitor_price_snapshots cps
+			JOIN product_competitors pc ON pc.id = cps.competitor_id
+			WHERE pc.product_id = $1
+			  AND cps.checked_at < $2
+			  AND cps.status = 'ok'
+			  AND cps.price IS NOT NULL
+			ORDER BY cps.competitor_id, cps.checked_at DESC
+		)
+		SELECT price FROM latest ORDER BY price ASC`, productID, before)
+	if err != nil {
+		return CompetitorPriceStats{}, err
+	}
+	defer rows.Close()
+	return collectPriceStats(rows)
+}
+
+func (r *productCompetitorsPg) CurrentStats(ctx context.Context, productID uuid.UUID) (CompetitorPriceStats, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT last_price::float8
+		FROM product_competitors
+		WHERE product_id = $1
+		  AND last_status = 'ok'
+		  AND last_price IS NOT NULL
+		ORDER BY last_price ASC`, productID)
+	if err != nil {
+		return CompetitorPriceStats{}, err
+	}
+	defer rows.Close()
+	return collectPriceStats(rows)
+}
+
+func collectPriceStats(rows pgx.Rows) (CompetitorPriceStats, error) {
+	var prices []float64
+	for rows.Next() {
+		var p float64
+		if err := rows.Scan(&p); err != nil {
+			return CompetitorPriceStats{}, err
+		}
+		prices = append(prices, p)
+	}
+	if err := rows.Err(); err != nil {
+		return CompetitorPriceStats{}, err
+	}
+	out := CompetitorPriceStats{Count: len(prices)}
+	if len(prices) == 0 {
+		return out, nil
+	}
+	min := prices[0]
+	out.Min = &min
+	if len(prices)%2 == 1 {
+		median := prices[len(prices)/2]
+		out.Median = &median
+	} else {
+		median := (prices[len(prices)/2-1] + prices[len(prices)/2]) / 2
+		out.Median = &median
+	}
+	return out, nil
+}
+
 // ListStaleForRefresh — Этап 7. Для competitorRefreshTick.
 // Возвращает competitor_id + user_id (через JOIN) для записей с устаревшими
 // или отсутствующими last_checked_at. Только активные статусы (pending/ok/rate_limited)

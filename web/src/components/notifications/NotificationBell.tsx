@@ -1,27 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { Bell, AlertTriangle, AlertCircle, Info, CheckCheck } from 'lucide-react'
-import { notificationsApi, type NotificationResponse, SEVERITY_LABEL } from '@/api/notifications'
-import { cn } from '@/lib/utils'
-
-function severityIcon(s: NotificationResponse['severity']) {
-  if (s === 'error') return <AlertCircle className="h-4 w-4 text-red-600 shrink-0" />
-  if (s === 'warning') return <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-  return <Info className="h-4 w-4 text-blue-600 shrink-0" />
-}
-
-function timeago(iso: string) {
-  const t = new Date(iso).getTime()
-  const diff = Math.max(0, Date.now() - t)
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return 'только что'
-  if (mins < 60) return `${mins} мин назад`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs} ч назад`
-  const days = Math.floor(hrs / 24)
-  return `${days} дн назад`
-}
+import { Bell, CheckCheck } from 'lucide-react'
+import { notificationsApi, type NotificationResponse } from '@/api/notifications'
+import { NotificationItem, notificationTarget } from '@/components/notifications/NotificationItem'
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
@@ -72,11 +54,7 @@ export function NotificationBell() {
       markRead.mutate(n.id)
     }
     setOpen(false)
-    if (n.plan_id) {
-      navigate(`/price-plans/${n.plan_id}`)
-      return
-    }
-    navigate(`/notifications`)
+    navigate(notificationTarget(n))
   }
 
   return (
@@ -115,28 +93,12 @@ export function NotificationBell() {
               <div className="p-6 text-sm text-[#666] text-center">Пока нет уведомлений</div>
             )}
             {list?.items.map((n) => (
-              <button
+              <NotificationItem
                 key={n.id}
+                notification={n}
+                compact
                 onClick={() => handleItemClick(n)}
-                className={cn(
-                  'w-full text-left px-4 py-3 border-b border-[#f0f0f0] hover:bg-[#f7f8fa] transition-colors flex gap-3',
-                  !n.read_at && 'bg-blue-50/50'
-                )}
-              >
-                <div className="pt-0.5">{severityIcon(n.severity)}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="text-xs font-medium text-[#666]">
-                      {SEVERITY_LABEL[n.severity]}
-                    </span>
-                    <span className="text-xs text-[#aaa] shrink-0">{timeago(n.created_at)}</span>
-                  </div>
-                  <div className="text-sm font-semibold text-[#111] truncate">{n.title}</div>
-                  {n.body && (
-                    <div className="text-xs text-[#666] mt-0.5 line-clamp-2">{n.body}</div>
-                  )}
-                </div>
-              </button>
+              />
             ))}
           </div>
 

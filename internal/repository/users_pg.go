@@ -39,7 +39,7 @@ func (r *usersPg) Create(ctx context.Context, u *domain.User) error {
 func (r *usersPg) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	return r.scanUser(ctx, `
 		SELECT id, email, password_hash, display_name, status,
-		       failed_login_count, lockout_until, created_at
+		       failed_login_count, lockout_until, tg_muted_until, created_at
 		FROM users WHERE email = $1
 	`, email)
 }
@@ -47,7 +47,7 @@ func (r *usersPg) GetByEmail(ctx context.Context, email string) (*domain.User, e
 func (r *usersPg) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	return r.scanUser(ctx, `
 		SELECT id, email, password_hash, display_name, status,
-		       failed_login_count, lockout_until, created_at
+		       failed_login_count, lockout_until, tg_muted_until, created_at
 		FROM users WHERE id = $1
 	`, id)
 }
@@ -119,7 +119,7 @@ func (r *usersPg) scanUser(ctx context.Context, query string, args ...any) (*dom
 	u := &domain.User{}
 	err := row.Scan(
 		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Status,
-		&u.FailedLoginCount, &u.LockoutUntil, &u.CreatedAt,
+		&u.FailedLoginCount, &u.LockoutUntil, &u.TelegramMutedUntil, &u.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound

@@ -184,95 +184,107 @@ func NewConstraintHitEvent(planID, shopID uuid.UUID, hits ConstraintHits) Event 
 }
 
 func NewBusinessWarningNoCostEvent(productID uuid.UUID, externalSKU, productName string) Event {
+	cid := productID
 	return Event{
 		Type:     domain.NotificationEventBusinessWarningNoCost,
 		Severity: domain.NotificationSeverityWarning,
 		Title:    "Не указана себестоимость",
-		Body:    fmt.Sprintf("Товар %s (%s) под стратегией маржи без cost_price.", productName, externalSKU),
+		Body:     fmt.Sprintf("Товар %s (%s) под стратегией маржи без cost_price.", productName, externalSKU),
 		Data: map[string]any{
 			"product_id":   productID,
 			"external_sku": externalSKU,
 			"product_name": productName,
 		},
-		DedupeWindow: 24 * time.Hour,
+		CorrelationID: &cid,
+		DedupeWindow:  24 * time.Hour,
 	}
 }
 
 func NewBusinessWarningNoCompetitorsEvent(productID uuid.UUID, externalSKU, productName string) Event {
+	cid := productID
 	return Event{
 		Type:     domain.NotificationEventBusinessWarningNoCompetitors,
 		Severity: domain.NotificationSeverityWarning,
 		Title:    "Нет данных о конкурентах",
-		Body:    fmt.Sprintf("По товару %s (%s) >24ч нет цены конкурентов; стратегия может уйти в fallback.", productName, externalSKU),
+		Body:     fmt.Sprintf("По товару %s (%s) >24ч нет цены конкурентов; стратегия может уйти в fallback.", productName, externalSKU),
 		Data: map[string]any{
 			"product_id":   productID,
 			"external_sku": externalSKU,
 			"product_name": productName,
 		},
-		DedupeWindow: 24 * time.Hour,
+		CorrelationID: &cid,
+		DedupeWindow:  24 * time.Hour,
 	}
 }
 
 func NewBusinessWarningPriceDriftEvent(productID uuid.UUID, externalSKU string, expected, actual float64) Event {
+	cid := productID
 	return Event{
 		Type:     domain.NotificationEventBusinessWarningPriceDrift,
 		Severity: domain.NotificationSeverityWarning,
 		Title:    "Цена в маркетплейсе разошлась с расчётной",
-		Body:    fmt.Sprintf("SKU %s: расчётная %.2f, текущая %.2f.", externalSKU, expected, actual),
+		Body:     fmt.Sprintf("SKU %s: расчётная %.2f, текущая %.2f.", externalSKU, expected, actual),
 		Data: map[string]any{
 			"product_id":   productID,
 			"external_sku": externalSKU,
 			"expected":     expected,
 			"actual":       actual,
 		},
-		DedupeWindow: 24 * time.Hour,
+		CorrelationID: &cid,
+		DedupeWindow:  24 * time.Hour,
 	}
 }
 
 func NewCompetitorPriceDroppedEvent(productID uuid.UUID, externalSKU string, oldPrice, newPrice float64) Event {
+	cid := productID
 	return Event{
 		Type:     domain.NotificationEventCompetitorPriceDropped,
 		Severity: domain.NotificationSeverityInfo,
 		Title:    "Конкурент снизил цену",
-		Body:    fmt.Sprintf("SKU %s: было %.2f → стало %.2f.", externalSKU, oldPrice, newPrice),
+		Body:     fmt.Sprintf("SKU %s: было %.2f → стало %.2f.", externalSKU, oldPrice, newPrice),
 		Data: map[string]any{
 			"product_id":   productID,
 			"external_sku": externalSKU,
 			"old_price":    oldPrice,
 			"new_price":    newPrice,
 		},
-		DedupeWindow: 6 * time.Hour,
+		CorrelationID: &cid,
+		DedupeWindow:  6 * time.Hour,
 	}
 }
 
 func NewCompetitorAppearedEvent(productID uuid.UUID, externalSKU, competitorURL string, price float64) Event {
+	cid := productID
 	return Event{
 		Type:     domain.NotificationEventCompetitorAppeared,
 		Severity: domain.NotificationSeverityInfo,
 		Title:    "Появился новый конкурент",
-		Body:    fmt.Sprintf("SKU %s: %s по цене %.2f.", externalSKU, competitorURL, price),
+		Body:     fmt.Sprintf("SKU %s: %s по цене %.2f.", externalSKU, competitorURL, price),
 		Data: map[string]any{
 			"product_id":     productID,
 			"external_sku":   externalSKU,
 			"competitor_url": competitorURL,
 			"price":          price,
 		},
-		DedupeWindow: 24 * time.Hour,
+		CorrelationID: &cid,
+		DedupeWindow:  24 * time.Hour,
 	}
 }
 
 func NewMedianShiftedEvent(productID uuid.UUID, externalSKU string, oldMedian, newMedian float64) Event {
+	cid := productID
 	return Event{
 		Type:     domain.NotificationEventMedianShifted,
 		Severity: domain.NotificationSeverityInfo,
 		Title:    "Медиана конкурентов сильно сдвинулась",
-		Body:    fmt.Sprintf("SKU %s: было %.2f → стало %.2f.", externalSKU, oldMedian, newMedian),
+		Body:     fmt.Sprintf("SKU %s: было %.2f → стало %.2f.", externalSKU, oldMedian, newMedian),
 		Data: map[string]any{
 			"product_id":   productID,
 			"external_sku": externalSKU,
 			"old_median":   oldMedian,
 			"new_median":   newMedian,
 		},
-		DedupeWindow: 24 * time.Hour,
+		CorrelationID: &cid,
+		DedupeWindow:  24 * time.Hour,
 	}
 }

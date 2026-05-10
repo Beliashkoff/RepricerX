@@ -100,6 +100,10 @@ func main() {
 
 	notifierService.Register(notifiersvc.NewInAppChannel())
 	notifierService.Register(notifiersvc.NewEmailChannel(workerMailer, usersRepo, frontendURL))
+	notifierService.Register(notifiersvc.NewWebhookChannel(webhooksRepo))
+	if cfg.TelegramBotToken != "" {
+		notifierService.Register(notifiersvc.NewTelegramChannel(cfg.TelegramBotToken, telegramLinksRepo, usersRepo, frontendURL))
+	}
 
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
 		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
@@ -148,7 +152,7 @@ func main() {
 
 	// Этап 7: competitor refresh handler. competitor.Service использует ozon-lookup
 	// (или другой источник) для обновления цен конкурентов.
-	competitorService := competitorsvc.New(competitorsRepo, nil)
+	competitorService := competitorsvc.New(competitorsRepo, nil, competitorsvc.WithNotifier(notifierService))
 	// notifier и notifier-репо инициализированы выше — до dispatcherService.
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -377,7 +381,8 @@ func processCompetitorRefreshJob(log *slog.Logger, jobs repository.BackgroundJob
 
 // processNotifierJob — обработчик notification_deliver и
 // notification_digest_deliver. Контракт ошибок:
-//   nil → Succeed; любая ошибка → Retry до max_attempts, иначе Fail.
+//
+//	nil → Succeed; любая ошибка → Retry до max_attempts, иначе Fail.
 func processNotifierJob(log *slog.Logger, jobs repository.BackgroundJobsRepository, ns *notifiersvc.Service, job *domain.BackgroundJob, started time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

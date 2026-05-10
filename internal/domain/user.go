@@ -8,14 +8,15 @@ import (
 
 // User — основная сущность пользователя.
 type User struct {
-	ID               uuid.UUID
-	Email            string
-	PasswordHash     string
-	DisplayName      string
-	Status           string    // pending_verification | active | blocked
-	FailedLoginCount int
-	LockoutUntil     *time.Time // NULL пока нет блокировки
-	CreatedAt        time.Time
+	ID                 uuid.UUID
+	Email              string
+	PasswordHash       string
+	DisplayName        string
+	Status             string // pending_verification | active | blocked
+	FailedLoginCount   int
+	LockoutUntil       *time.Time // NULL пока нет блокировки
+	TelegramMutedUntil *time.Time
+	CreatedAt          time.Time
 }
 
 // Константы статусов — чтобы не было опечаток в строках по всей кодовой базе.

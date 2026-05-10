@@ -22,6 +22,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setIsLoading(false))
   }, [])
 
+  useEffect(() => {
+    function handleUnauthorized() {
+      setUser(null)
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login')
+      }
+    }
+    window.addEventListener('rx:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('rx:unauthorized', handleUnauthorized)
+  }, [])
+
   const login = useCallback(async (email: string, password: string) => {
     const u = await authApi.login(email, password)
     setUser(u)

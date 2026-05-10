@@ -134,7 +134,6 @@ func main() {
 		},
 	})
 	strategyService := strategysvc.New(strategiesRepo, assignmentsRepo)
-	competitorService := competitorsvc.New(competitorsRepo, nil)
 	plansRepo := repository.NewPricePlansRepository(pool)
 	pricingMarketplaceFactories := map[string]pricingsvc.MarketplaceFactory{
 		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
@@ -172,7 +171,11 @@ func main() {
 
 	notifierService.Register(notifiersvc.NewInAppChannel())
 	notifierService.Register(notifiersvc.NewEmailChannel(m, usersRepo, frontendURL))
-	// Telegram/Webhook каналы регистрируются ниже (Этап E/F).
+	notifierService.Register(notifiersvc.NewWebhookChannel(webhooksRepo))
+	if cfg.TelegramBotToken != "" {
+		notifierService.Register(notifiersvc.NewTelegramChannel(cfg.TelegramBotToken, telegramLinksRepo, usersRepo, frontendURL))
+	}
+	competitorService := competitorsvc.New(competitorsRepo, nil, competitorsvc.WithNotifier(notifierService))
 
 	dispatcherService := dispatchersvc.New(
 		plansRepo, productsRepo, priceChangesRepo, intLogRepo,

@@ -265,6 +265,19 @@ type StaleCompetitor struct {
 	UserID       uuid.UUID
 }
 
+type CompetitorSignalContext struct {
+	ProductID    uuid.UUID
+	UserID       uuid.UUID
+	ExternalSKU  string
+	CurrentPrice float64
+}
+
+type CompetitorPriceStats struct {
+	Count  int
+	Min    *float64
+	Median *float64
+}
+
 type ProductCompetitorsRepository interface {
 	Create(ctx context.Context, userID uuid.UUID, input CompetitorCreateInput) (*domain.ProductCompetitor, error)
 	ListByProduct(ctx context.Context, userID, productID uuid.UUID) ([]*domain.ProductCompetitor, error)
@@ -273,6 +286,9 @@ type ProductCompetitorsRepository interface {
 	Delete(ctx context.Context, userID, competitorID uuid.UUID) error
 	SaveCheckResult(ctx context.Context, competitorID uuid.UUID, result CompetitorCheckResult) (*domain.ProductCompetitor, error)
 	LatestFreshPrice(ctx context.Context, userID, productID uuid.UUID, maxAge time.Duration) (*float64, error)
+	SignalContext(ctx context.Context, userID, productID uuid.UUID) (CompetitorSignalContext, error)
+	StatsBefore(ctx context.Context, productID uuid.UUID, before time.Time) (CompetitorPriceStats, error)
+	CurrentStats(ctx context.Context, productID uuid.UUID) (CompetitorPriceStats, error)
 	// ListStaleForRefresh — для scheduler competitorRefreshTick (Этап 7).
 	// Возвращает competitor_id + user_id (через JOIN products + shops) для всех
 	// конкурентов с last_checked_at < since (или NULL) и активным статусом.
@@ -378,7 +394,7 @@ type BackgroundJobEnqueue struct {
 	Queue       string // "default" если пусто
 	Priority    int
 	Payload     []byte
-	MaxAttempts int    // 3 если 0
+	MaxAttempts int       // 3 если 0
 	RunAt       time.Time // now если zero
 }
 
@@ -430,6 +446,7 @@ type NotificationsRepository interface {
 	// ExistsRecentByDedupe — для дедупликации (например, integration_error по
 	// (user_id, event_type, shop_id) за окно). Реализация JOIN'ит data->>'shop_id'.
 	ExistsRecentByDedupe(ctx context.Context, userID uuid.UUID, eventType string, shopID *uuid.UUID, since time.Time) (bool, error)
+	ExistsRecentByCorrelation(ctx context.Context, userID uuid.UUID, eventType string, correlationID uuid.UUID, since time.Time) (bool, error)
 	// DeleteOlderThan — retention уведомлений.
 	DeleteOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }
