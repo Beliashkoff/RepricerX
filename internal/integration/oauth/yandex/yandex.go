@@ -97,7 +97,7 @@ func (c *Client) Exchange(ctx context.Context, code, codeVerifier string) (strin
 		return "", fmt.Errorf("yandex: token request: %w",
 			errors.Join(oauth.ErrProviderUnavailable, err))
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode != http.StatusOK {
@@ -131,7 +131,7 @@ func (c *Client) FetchUser(ctx context.Context, accessToken string) (domain.OAut
 		return domain.OAuthUserInfo{}, fmt.Errorf("yandex: user_info request: %w",
 			errors.Join(oauth.ErrProviderUnavailable, err))
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if resp.StatusCode != http.StatusOK {
