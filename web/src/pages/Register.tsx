@@ -96,8 +96,8 @@ export default function Register() {
     }
   }
 
-  function comingSoon() {
-    toast.info('Скоро будет доступно')
+  function startOAuth(provider: 'vk' | 'yandex') {
+    window.location.href = `/api/auth/oauth/${provider}/start`
   }
 
   if (registeredEmail) {
@@ -154,8 +154,8 @@ export default function Register() {
 
         <div className="bg-white rounded-3xl border border-[#e6e6e6] p-8 shadow-sm">
           <div className="flex flex-col gap-3 mb-6">
-            <SocialButton icon={<VKIcon />} label="Зарегистрироваться через VK ID" onClick={comingSoon} />
-            <SocialButton icon={<YandexIcon />} label="Зарегистрироваться через Яндекс" onClick={comingSoon} />
+            <SocialButton icon={<VKIcon />} label="Зарегистрироваться через VK ID" onClick={() => startOAuth('vk')} />
+            <SocialButton icon={<YandexIcon />} label="Зарегистрироваться через Яндекс" onClick={() => startOAuth('yandex')} />
           </div>
 
           <div className="relative flex items-center gap-3 mb-6">

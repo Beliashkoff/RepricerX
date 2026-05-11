@@ -63,6 +63,12 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       VERIFICATION_URL_BASE: https://${DOMAIN}/verify
       PASSWORD_RESET_URL_BASE: https://${DOMAIN}/reset-password
+      OAUTH_VK_CLIENT_ID: ${OAUTH_VK_CLIENT_ID:-}
+      OAUTH_VK_CLIENT_SECRET: ${OAUTH_VK_CLIENT_SECRET:-}
+      OAUTH_YANDEX_CLIENT_ID: ${OAUTH_YANDEX_CLIENT_ID:-}
+      OAUTH_YANDEX_CLIENT_SECRET: ${OAUTH_YANDEX_CLIENT_SECRET:-}
+      OAUTH_CALLBACK_BASE_URL: https://${DOMAIN}
+      OAUTH_FRONTEND_BASE_URL: https://${DOMAIN}
     depends_on:
       db:
         condition: service_healthy

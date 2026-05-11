@@ -40,12 +40,17 @@ import (
 
 	_ "github.com/Beliashkoff/RepricerX/docs"
 	"github.com/Beliashkoff/RepricerX/internal/config"
+	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/Beliashkoff/RepricerX/internal/integration/oauth"
+	"github.com/Beliashkoff/RepricerX/internal/integration/oauth/vkid"
+	"github.com/Beliashkoff/RepricerX/internal/integration/oauth/yandex"
 	"github.com/Beliashkoff/RepricerX/internal/integration/ozon"
 	"github.com/Beliashkoff/RepricerX/internal/integration/wildberries"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/logger"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/oauthstate"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redischeck"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
@@ -98,6 +103,7 @@ func main() {
 	sessionsRepo := repository.NewSessionsRepository(pool)
 	verRepo := repository.NewEmailVerificationsRepository(pool)
 	resetRepo := repository.NewPasswordResetTokensRepository(pool)
+	oauthIdentitiesRepo := repository.NewOAuthIdentitiesRepository(pool)
 	shopsRepo := repository.NewShopsRepository(pool)
 	productsRepo := repository.NewProductsRepository(pool)
 	importLogRepo := repository.NewImportLogRepository(pool)
@@ -214,6 +220,30 @@ func main() {
 		RateLimiter:      httpLimiter,
 	})
 
+	// OAuth-провайдеры (VK ID / Яндекс ID). Если client_id пуст — провайдер не
+	// регистрируется, и хендлер вернёт 503. БД-таблица oauth_identities
+	// существует независимо.
+	oauthProviders := map[domain.OAuthProvider]oauth.Provider{}
+	if cfg.OAuthVKClientID != "" && cfg.OAuthVKClientSecret != "" {
+		oauthProviders[domain.OAuthProviderVK] = vkid.New(
+			cfg.OAuthVKClientID, cfg.OAuthVKClientSecret,
+			cfg.OAuthCallbackBaseURL+"/api/auth/oauth/vk/callback",
+		)
+		log.Info("OAuth: VK ID настроен")
+	}
+	if cfg.OAuthYandexClientID != "" && cfg.OAuthYandexClientSecret != "" {
+		oauthProviders[domain.OAuthProviderYandex] = yandex.New(
+			cfg.OAuthYandexClientID, cfg.OAuthYandexClientSecret,
+			cfg.OAuthCallbackBaseURL+"/api/auth/oauth/yandex/callback",
+		)
+		log.Info("OAuth: Яндекс ID настроен")
+	}
+	if len(oauthProviders) > 0 {
+		svc.AttachOAuth(oauthProviders, oauthstate.NewRedisStore(cfg.RedisAddr), oauthIdentitiesRepo)
+	} else {
+		log.Info("OAuth-провайдеры не настроены: пропускаем (OAUTH_VK_CLIENT_ID/OAUTH_YANDEX_CLIENT_ID пусты)")
+	}
+
 	if cfg.IsProd() {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -241,6 +271,7 @@ func main() {
 		TrustProxy:          cfg.TrustProxyHeaders,
 		SecureCookie:        cfg.IsProd(),
 		FrontendURL:         frontendURL,
+		OAuthFrontendURL:    cfg.OAuthFrontendBaseURL,
 		TelegramBotStartURL: cfg.TelegramBotStartURL,
 		RateLimiter:         httpLimiter,
 		MaxBodyBytes:        cfg.MaxBodyBytes,

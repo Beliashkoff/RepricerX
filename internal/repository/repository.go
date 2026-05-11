@@ -527,3 +527,12 @@ type WebhooksRepository interface {
 	Delete(ctx context.Context, userID, id uuid.UUID) error
 	ListEnabledForUser(ctx context.Context, userID uuid.UUID) ([]*domain.Webhook, error)
 }
+
+// OAuthIdentitiesRepository — операции с таблицей oauth_identities.
+type OAuthIdentitiesRepository interface {
+	Create(ctx context.Context, identity *domain.OAuthIdentity) error
+	// GetByProviderAndExternalID ищет привязку (provider, external_id).
+	GetByProviderAndExternalID(ctx context.Context, provider domain.OAuthProvider, externalID string) (*domain.OAuthIdentity, error)
+	TouchLastLogin(ctx context.Context, id uuid.UUID) error
+	ListByUserID(ctx context.Context, userID uuid.UUID) ([]*domain.OAuthIdentity, error)
+}

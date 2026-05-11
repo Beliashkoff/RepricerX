@@ -54,6 +54,15 @@ type Config struct {
 	TelegramBotToken    string // токен бота; пусто = TG-канал отключён
 	TelegramBotStartURL string // префикс «https://t.me/<bot>?start=» для UI
 
+	// OAuth (VK ID + Яндекс ID).
+	// Пустые ClientID/Secret = провайдер недоступен; хендлер вернёт 503.
+	OAuthVKClientID         string
+	OAuthVKClientSecret     string
+	OAuthYandexClientID     string
+	OAuthYandexClientSecret string
+	OAuthCallbackBaseURL    string // base для построения redirect_uri (например, https://app.example.ru)
+	OAuthFrontendBaseURL    string // base для редиректов на фронтенд после callback'а
+
 	// HTTP
 	MaxBodyBytes int64 // лимит размера тела запроса в байтах
 }
@@ -130,6 +139,13 @@ func Load() (*Config, error) {
 
 	cfg.TelegramBotToken = strings.TrimSpace(getEnv("TELEGRAM_BOT_TOKEN", ""))
 	cfg.TelegramBotStartURL = strings.TrimSpace(getEnv("TELEGRAM_BOT_START_URL", ""))
+
+	cfg.OAuthVKClientID = strings.TrimSpace(getEnv("OAUTH_VK_CLIENT_ID", ""))
+	cfg.OAuthVKClientSecret = getEnv("OAUTH_VK_CLIENT_SECRET", "")
+	cfg.OAuthYandexClientID = strings.TrimSpace(getEnv("OAUTH_YANDEX_CLIENT_ID", ""))
+	cfg.OAuthYandexClientSecret = getEnv("OAUTH_YANDEX_CLIENT_SECRET", "")
+	cfg.OAuthCallbackBaseURL = strings.TrimRight(strings.TrimSpace(getEnv("OAUTH_CALLBACK_BASE_URL", "http://localhost:8080")), "/")
+	cfg.OAuthFrontendBaseURL = strings.TrimRight(strings.TrimSpace(getEnv("OAUTH_FRONTEND_BASE_URL", "http://localhost:5173")), "/")
 
 	maxBodyStr := getEnv("MAX_BODY_BYTES", "1048576") // 1 MiB по умолчанию
 	maxBody, err := strconv.ParseInt(maxBodyStr, 10, 64)

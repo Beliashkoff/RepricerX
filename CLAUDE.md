@@ -51,6 +51,7 @@ internal/pkg/crypto/     AES-256-GCM encrypt/decrypt (Encrypt/Decrypt + keyFromS
 - **Errors**: repository sentinel errors (`repository.ErrNotFound`, `ErrDuplicate`, …) are translated to service-level errors (`shopsvc.ErrShopNotFound`, …) which are translated to HTTP status codes in `transport/http/errors.go`. Never leak repository errors to handlers.
 - **Credentials**: marketplace API keys are stored **only** as AES-256-GCM ciphertext in `shops.credentials_encrypted`. Key comes from `APP_SECRET_KEY` env → `crypto.Encrypt`/`crypto.Decrypt`. Plaintext must never persist.
 - **Auth**: server-side sessions with `rx_session` HttpOnly cookie. CSRF protection via same-origin `Origin` header check (`middleware_csrf.go`) — applied to all mutating routes except the public auth group.
+- **OAuth (VK ID + Яндекс ID)**: серверный Authorization Code Flow с PKCE (S256). Адаптеры в `internal/integration/oauth/{vkid,yandex}`, общий интерфейс в `provider.go`. State + PKCE-verifier хранятся в Redis (`internal/pkg/oauthstate`) с TTL 10 минут; внешние идентичности — в таблице `oauth_identities`. При конфликте email с существующим email/password-аккаунтом callback редиректит на `/link-oauth` для подтверждения паролем. См. `internal/service/auth/oauth.go`.
 - **Marketplace factories**: `cmd/api/main.go` builds a `map[string]MarketplaceFactory` keyed by `"wb"` / `"ozon"` and injects it into `shopsvc.New`. Adding a new marketplace = new adapter + new key in the map, no other code changes.
 - **Background jobs**: worker claims jobs from `background_jobs` table via `BackgroundJobsRepository.ClaimNext` (advisory lock). `cmd/worker` polls; `cmd/api` enqueues via `ImportLogRepository.EnqueueProductImport`.
 - **Rate limiting**: `internal/pkg/ratelimit` — per-shop token bucket; `integration.ErrRateLimited` is returned by adapters on HTTP 429 and mapped to `shopsvc.ErrRateLimited` → HTTP 429 in `handleShopErr`.
@@ -230,6 +231,7 @@ docker-compose.prod.yaml
 - [x] `GET /api/auth/me`, `PATCH /api/auth/me` (смена display name).
 - [x] Middleware `RequireAuth`.
 - [x] TTL сессии 24 ч неактивности.
+- [x] OAuth-логин/регистрация через **VK ID** и **Яндекс ID** (PKCE S256, таблица `oauth_identities`, миграция `000015`, флоу подтверждения при конфликте email на странице `/link-oauth`).
 
 ### Этап 2. Магазины и интеграции (2–3 дня)
 **Покрывает ТЗ:** 4.1.1.2, 4.1.1.12.

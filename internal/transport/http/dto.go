@@ -66,3 +66,9 @@ type resetPasswordRequest struct {
 	NewPassword          string `json:"newPassword,omitempty" example:"NewValidPass123!"`
 	PasswordConfirmation string `json:"passwordConfirmation,omitempty" example:"NewValidPass123!"`
 }
+
+// POST /api/auth/oauth/link — подтверждение привязки OAuth-провайдера к существующему email-аккаунту.
+type oauthLinkRequest struct {
+	LinkToken string `json:"link_token" binding:"required" example:"abcdef..."`
+	Password  string `json:"password"   binding:"required" example:"MyP@ssword123"`
+}

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
+	"github.com/Beliashkoff/RepricerX/internal/integration/oauth"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/auditlog"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/mailer"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/netutil"
+	"github.com/Beliashkoff/RepricerX/internal/pkg/oauthstate"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/password"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/redislimit"
 	"github.com/Beliashkoff/RepricerX/internal/pkg/token"
@@ -49,6 +51,12 @@ type Service struct {
 	mailer        mailer.Mailer
 	audit         *auditlog.Logger
 	cfg           Config
+
+	// OAuth — опциональные зависимости, подключаются через AttachOAuth.
+	// Если nil — методы Begin/Complete/ConfirmOAuth возвращают ErrOAuthDisabled.
+	oauthProviders  map[domain.OAuthProvider]oauth.Provider
+	oauthStore      oauthstate.Store
+	oauthIdentities repository.OAuthIdentitiesRepository
 
 	// resendLimiter — rate-limit resend verification: 1 запрос в минуту на email.
 	resendMu           sync.Mutex

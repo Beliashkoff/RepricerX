@@ -23,6 +23,25 @@ function YandexIcon() {
   )
 }
 
+function oauthErrorMessage(code: string): string {
+  switch (code) {
+    case 'oauth_disabled':
+      return 'Вход через социальные сети временно недоступен'
+    case 'unknown_provider':
+      return 'Неизвестный провайдер'
+    case 'invalid_state':
+      return 'Сессия OAuth истекла — попробуйте снова'
+    case 'user_blocked':
+      return 'Аккаунт заблокирован'
+    case 'provider_failed':
+      return 'Не удалось получить данные у провайдера'
+    case 'missing_params':
+      return 'Некорректный ответ от провайдера'
+    default:
+      return 'Не удалось войти через социальную сеть'
+  }
+}
+
 function SocialButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
     <button
@@ -50,6 +69,9 @@ export default function Login() {
     const v = searchParams.get('verified')
     if (v === '1') toast.success('Email подтверждён — можно войти')
     else if (v === '0') toast.error('Ссылка недействительна или уже использована')
+
+    const oe = searchParams.get('oauth_error')
+    if (oe) toast.error(oauthErrorMessage(oe))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isLoading && user) return <Navigate to="/dashboard" replace />
@@ -79,8 +101,8 @@ export default function Login() {
     }
   }
 
-  function comingSoon() {
-    toast.info('Скоро будет доступно')
+  function startOAuth(provider: 'vk' | 'yandex') {
+    window.location.href = `/api/auth/oauth/${provider}/start`
   }
 
   return (
@@ -97,8 +119,8 @@ export default function Login() {
 
         <div className="bg-white rounded-3xl border border-[#e6e6e6] p-8 shadow-sm">
           <div className="flex flex-col gap-3 mb-6">
-            <SocialButton icon={<VKIcon />} label="Войти через VK ID" onClick={comingSoon} />
-            <SocialButton icon={<YandexIcon />} label="Войти через Яндекс ID" onClick={comingSoon} />
+            <SocialButton icon={<VKIcon />} label="Войти через VK ID" onClick={() => startOAuth('vk')} />
+            <SocialButton icon={<YandexIcon />} label="Войти через Яндекс ID" onClick={() => startOAuth('yandex')} />
           </div>
 
           <div className="relative flex items-center gap-3 mb-6">

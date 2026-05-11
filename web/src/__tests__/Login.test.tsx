@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -149,18 +149,43 @@ describe('Login — ошибка входа', () => {
 })
 
 describe('Login — социальные кнопки', () => {
-  beforeEach(() => vi.clearAllMocks())
+  const originalLocation = window.location
+  let assignedHref: string
 
-  it('VK → toast "Скоро будет доступно"', async () => {
-    renderLogin()
-    await user.click(screen.getByRole('button', { name: /VK ID/i }))
-    expect(mockToastInfo).toHaveBeenCalledWith('Скоро будет доступно')
+  beforeEach(() => {
+    vi.clearAllMocks()
+    assignedHref = ''
+    // Перехватываем присваивание window.location.href, не трогая остальные поля.
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        get href() { return assignedHref },
+        set href(v: string) { assignedHref = v },
+        assign: (v: string) => { assignedHref = v },
+        pathname: originalLocation.pathname,
+        origin: originalLocation.origin,
+      },
+    })
   })
 
-  it('Яндекс → toast "Скоро будет доступно"', async () => {
+  afterEach(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
+  it('VK → редирект на /api/auth/oauth/vk/start', async () => {
+    renderLogin()
+    await user.click(screen.getByRole('button', { name: /VK ID/i }))
+    expect(assignedHref).toBe('/api/auth/oauth/vk/start')
+  })
+
+  it('Яндекс → редирект на /api/auth/oauth/yandex/start', async () => {
     renderLogin()
     await user.click(screen.getByRole('button', { name: /Яндекс/i }))
-    expect(mockToastInfo).toHaveBeenCalledWith('Скоро будет доступно')
+    expect(assignedHref).toBe('/api/auth/oauth/yandex/start')
   })
 
   it('VK не вызывает login', async () => {

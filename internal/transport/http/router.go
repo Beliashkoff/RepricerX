@@ -38,6 +38,10 @@ type RouterConfig struct {
 	TrustProxy     bool
 	SecureCookie   bool   // true в prod
 	FrontendURL    string // куда редиректить после email-verify
+	// OAuthFrontendURL — base фронтенда для OAuth-редиректов (success → /dashboard,
+	// link required → /link-oauth, ошибка → /login?oauth_error=...).
+	// Если пусто — используется FrontendURL.
+	OAuthFrontendURL string
 	// TelegramBotStartURL — префикс «https://t.me/<bot>?start=» для UI;
 	// пустая строка → notification handler вернёт 503 на запросы линковки.
 	TelegramBotStartURL string
@@ -58,6 +62,11 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 	r.Use(bodySizeLimit(cfg.MaxBodyBytes))
 
 	authH := NewAuthHandler(cfg.AuthSvc, cfg.SecureCookie, cfg.FrontendURL)
+	oauthFrontendURL := cfg.OAuthFrontendURL
+	if oauthFrontendURL == "" {
+		oauthFrontendURL = cfg.FrontendURL
+	}
+	oauthH := NewOAuthHandler(cfg.AuthSvc, cfg.SecureCookie, oauthFrontendURL)
 	shopH := NewShopHandler(cfg.ShopSvc)
 	productH := NewProductHandler(cfg.ProductSvc)
 	competitorH := NewCompetitorHandler(cfg.CompetitorSvc)
@@ -90,6 +99,16 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 			rateLimitSpec{Scope: "auth:reset:ip", Limit: limitPasswordIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
 			rateLimitSpec{Scope: "auth:reset:token", Limit: limitResetToken, Window: time.Minute, Key: jsonFieldRateKey("token")},
 		), authH.ResetPassword)
+
+		// OAuth: VK ID + Яндекс ID. /start и /callback — GET (state-токен исполняет
+		// роль CSRF), /link — POST с собственным одноразовым link_token из Redis.
+		public.GET("/oauth/:provider/start", rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "auth:oauth:start:ip", Limit: limitPasswordIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
+		), oauthH.Start)
+		public.GET("/oauth/:provider/callback", oauthH.Callback)
+		public.POST("/oauth/link", rateLimit(cfg.RateLimiter,
+			rateLimitSpec{Scope: "auth:oauth:link:ip", Limit: limitLoginIP, Window: time.Minute, Key: ipRateKey(cfg.TrustProxy)},
+		), oauthH.Link)
 	}
 
 	requireAuth := RequireAuth(cfg.AuthSvc, cfg.Audit, cfg.TrustProxy, cfg.SecureCookie)

@@ -21,10 +21,15 @@ func NewUsersRepository(db *pgxpool.Pool) UsersRepository {
 }
 
 func (r *usersPg) Create(ctx context.Context, u *domain.User) error {
+	// Пустой PasswordHash → NULL в БД (OAuth-only пользователи).
+	var passwordHash any
+	if u.PasswordHash != "" {
+		passwordHash = u.PasswordHash
+	}
 	_, err := r.db.Exec(ctx, `
 		INSERT INTO users (id, email, password_hash, display_name, status)
 		VALUES ($1, $2, $3, $4, $5)
-	`, u.ID, u.Email, u.PasswordHash, u.DisplayName, u.Status)
+	`, u.ID, u.Email, passwordHash, u.DisplayName, u.Status)
 	if err != nil {
 		// Postgres unique-violation code 23505 → ErrEmailTaken
 		var pgErr *pgconn.PgError
@@ -117,8 +122,10 @@ func (r *usersPg) SetTelegramMutedUntil(ctx context.Context, id uuid.UUID, until
 func (r *usersPg) scanUser(ctx context.Context, query string, args ...any) (*domain.User, error) {
 	row := r.db.QueryRow(ctx, query, args...)
 	u := &domain.User{}
+	// password_hash может быть NULL для OAuth-only пользователей.
+	var passwordHash *string
 	err := row.Scan(
-		&u.ID, &u.Email, &u.PasswordHash, &u.DisplayName, &u.Status,
+		&u.ID, &u.Email, &passwordHash, &u.DisplayName, &u.Status,
 		&u.FailedLoginCount, &u.LockoutUntil, &u.TelegramMutedUntil, &u.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -126,6 +133,9 @@ func (r *usersPg) scanUser(ctx context.Context, query string, args ...any) (*dom
 	}
 	if err != nil {
 		return nil, err
+	}
+	if passwordHash != nil {
+		u.PasswordHash = *passwordHash
 	}
 	return u, nil
 }

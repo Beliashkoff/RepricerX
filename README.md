@@ -57,6 +57,29 @@ make down    # остановить dev-сервисы
 | POST  | `/api/auth/verification/resend` | —         | —    | Повторная отправка письма верификации            |
 | POST  | `/api/auth/password/forgot`  | —           | —    | Запрос ссылки сброса пароля; всегда возвращает общий ответ |
 | POST  | `/api/auth/password/reset`   | —           | —    | Установка нового пароля по одноразовому токену   |
+| GET   | `/api/auth/oauth/:provider/start`    | — | — | Начало OAuth-логина: редирект на форму согласия VK ID / Яндекс ID |
+| GET   | `/api/auth/oauth/:provider/callback` | — | — | Callback провайдера; создаёт сессию или редиректит на `/link-oauth` |
+| POST  | `/api/auth/oauth/link`               | — | — | Подтверждение привязки OAuth-аккаунта паролем               |
+
+### OAuth: VK ID и Яндекс ID
+
+В RepricerX поддерживаются вход и регистрация через **VK ID** и **Яндекс ID**. Поток — серверный Authorization Code Flow с PKCE (S256), state и PKCE-verifier хранятся в Redis с TTL 10 минут. БД-таблица `oauth_identities` связывает внешний `(provider, external_id)` с локальным пользователем (миграция `000015`).
+
+**1. Регистрация приложений у провайдеров.** Без `client_id`/`client_secret` хендлер вернёт 503 — провайдеры опциональны.
+
+- **VK ID** — https://id.vk.com/about/business/go: создайте «Веб-приложение» и в «Доверенные redirect URI» укажите `<OAUTH_CALLBACK_BASE_URL>/api/auth/oauth/vk/callback` (в dev: `http://localhost:8080/api/auth/oauth/vk/callback`). Запросите доступ к email. Скопируйте идентификатор приложения и защищённый ключ.
+- **Яндекс ID** — https://oauth.yandex.ru/client/new: создайте «Веб-сервисы», тот же `redirect_uri`, доступы — «Доступ к email» (`login:email`) и «Доступ к логину, имени и фамилии, полу» (`login:info`).
+
+**2. Переменные окружения.** Список см. в `.env.example`:
+
+```
+OAUTH_VK_CLIENT_ID, OAUTH_VK_CLIENT_SECRET
+OAUTH_YANDEX_CLIENT_ID, OAUTH_YANDEX_CLIENT_SECRET
+OAUTH_CALLBACK_BASE_URL=http://localhost:8080
+OAUTH_FRONTEND_BASE_URL=http://localhost:5173
+```
+
+**3. Конфликт email.** Если провайдер возвращает email, который уже занят email/password-аккаунтом, callback вместо логина перенаправляет на `/link-oauth?token=…&email=…&provider=…`. Пользователь вводит пароль; backend проверяет его и создаёт связь `oauth_identities`, после чего выдаёт сессию.
 
 > Все ошибки возвращаются в формате `{"error":{"code":"...","message":"..."}}`.  
 > Мутирующие защищённые эндпоинты проверяют заголовок `Origin` (same-origin CSRF).

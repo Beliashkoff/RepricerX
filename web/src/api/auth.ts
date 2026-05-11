@@ -23,4 +23,6 @@ export const authApi = {
   logout: () => apiClient.post('/auth/logout'),
   updateMe: (displayName: string) =>
     apiClient.patch<User>('/auth/me', { displayName }).then(r => r.data),
+  linkOAuth: (linkToken: string, password: string) =>
+    apiClient.post<User>('/auth/oauth/link', { link_token: linkToken, password }).then(r => r.data),
 }
