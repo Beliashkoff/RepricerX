@@ -19,17 +19,31 @@ function VKIcon() {
 function YandexIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M2.04 12c0-5.523 4.476-10 9.998-10C17.522 2 22 6.477 22 12s-4.478 10-9.962 10C6.516 22 2.04 17.523 2.04 12zm11.05 4.885V13.15h.927l2.132 3.735h1.785l-2.34-4.016c1.23-.404 1.97-1.38 1.97-2.747 0-1.88-1.196-2.972-3.307-2.972h-2.742v9.735h1.575zm0-8.342h1.028c1.196 0 1.858.562 1.858 1.591 0 1.057-.662 1.647-1.858 1.647h-1.028V8.543z" />
+      <path d="M13.32 21.5h2.882V2.5h-4.193C7.795 2.5 5.5 4.658 5.5 7.844c0 2.542 1.21 4.038 3.36 5.564L5.13 21.5h3.097l4.158-9.643-1.45-.978C9.182 9.703 8.328 8.78 8.328 6.79c0-1.747 1.231-2.927 3.461-2.927h1.531V21.5z" />
     </svg>
   )
 }
 
-function SocialButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+function SocialButton({
+  icon,
+  label,
+  onClick,
+  variant,
+}: {
+  icon: React.ReactNode
+  label: string
+  onClick: () => void
+  variant: 'vk' | 'yandex'
+}) {
+  const styles =
+    variant === 'vk'
+      ? 'bg-[#0077FF] hover:bg-[#0066DD] text-white'
+      : 'bg-[#FC3F1D] hover:bg-[#E13615] text-white'
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center justify-center gap-2.5 w-full px-4 py-2.5 rounded-xl border border-[#e6e6e6] bg-white text-sm font-medium text-[#333] hover:bg-[#f5f5f5] transition-colors"
+      className={`flex items-center justify-center gap-2.5 w-full px-4 py-2.5 rounded-xl border border-transparent text-sm font-medium transition-colors ${styles}`}
     >
       {icon}
       {label}
@@ -106,7 +120,7 @@ export default function Register() {
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <Link to="/" className="inline-flex items-center gap-2 font-bold text-xl text-[#111]">
-              <span className="w-9 h-9 rounded-xl bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold">R</span>
+              <img src="/logo.png" alt="RepricerX logo" className="w-9 h-9 rounded-lg object-contain pointer-events-none" draggable={false} />
               RepricerX
             </Link>
           </div>
@@ -145,7 +159,7 @@ export default function Register() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 font-bold text-xl text-[#111]">
-            <span className="w-9 h-9 rounded-xl bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold">R</span>
+            <img src="/logo.png" alt="RepricerX logo" className="w-9 h-9 rounded-lg object-contain pointer-events-none" draggable={false} />
             RepricerX
           </Link>
           <h1 className="text-2xl font-bold text-[#111] mt-6 mb-1">Создать аккаунт</h1>
@@ -154,8 +168,8 @@ export default function Register() {
 
         <div className="bg-white rounded-3xl border border-[#e6e6e6] p-8 shadow-sm">
           <div className="flex flex-col gap-3 mb-6">
-            <SocialButton icon={<VKIcon />} label="Зарегистрироваться через VK ID" onClick={() => startOAuth('vk')} />
-            <SocialButton icon={<YandexIcon />} label="Зарегистрироваться через Яндекс" onClick={() => startOAuth('yandex')} />
+            <SocialButton icon={<VKIcon />} label="Зарегистрироваться через VK ID" onClick={() => startOAuth('vk')} variant="vk" />
+            <SocialButton icon={<YandexIcon />} label="Зарегистрироваться через Яндекс ID" onClick={() => startOAuth('yandex')} variant="yandex" />
           </div>
 
           <div className="relative flex items-center gap-3 mb-6">

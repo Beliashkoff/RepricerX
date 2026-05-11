@@ -42,7 +42,7 @@ export default function ForgotPassword() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 font-bold text-xl text-[#111]">
-            <span className="w-9 h-9 rounded-xl bg-[#ffcc00] flex items-center justify-center text-[#111] font-bold">R</span>
+            <img src="/logo.png" alt="RepricerX logo" className="w-9 h-9 rounded-lg object-contain pointer-events-none" draggable={false} />
             RepricerX
           </Link>
           <h1 className="text-2xl font-bold text-[#111] mt-6 mb-1">Восстановить пароль</h1>
