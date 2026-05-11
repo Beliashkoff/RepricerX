@@ -65,6 +65,10 @@ type Config struct {
 
 	// HTTP
 	MaxBodyBytes int64 // лимит размера тела запроса в байтах
+
+	// Mock-режим маркетплейсов (только dev). При true адаптеры WB/Ozon
+	// заменяются на in-memory заглушки из internal/integration/mock.
+	MockMarketplaces bool
 }
 
 func Load() (*Config, error) {
@@ -154,6 +158,8 @@ func Load() (*Config, error) {
 	}
 	cfg.MaxBodyBytes = maxBody
 
+	cfg.MockMarketplaces, _ = strconv.ParseBool(getEnv("MOCK_MARKETPLACES", "false"))
+
 	switch cfg.MailerMode {
 	case "log":
 	case "smtp":
@@ -165,6 +171,9 @@ func Load() (*Config, error) {
 	}
 
 	if cfg.Environment == "prod" {
+		if cfg.MockMarketplaces {
+			return nil, fmt.Errorf("MOCK_MARKETPLACES=true запрещён при ENVIRONMENT=prod")
+		}
 		if cfg.MailerMode != "smtp" {
 			return nil, fmt.Errorf("MAILER_MODE=smtp обязателен в prod")
 		}

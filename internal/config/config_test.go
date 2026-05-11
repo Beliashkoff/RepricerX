@@ -103,3 +103,49 @@ func TestLoad_InvalidMailerMode(t *testing.T) {
 		t.Fatalf("error = %q, want MAILER_MODE validation error", err.Error())
 	}
 }
+
+func TestLoad_MockMarketplacesDefaultsFalse(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.MockMarketplaces {
+		t.Fatal("MockMarketplaces должен быть false по умолчанию")
+	}
+}
+
+func TestLoad_MockMarketplacesParsesTrue(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("MOCK_MARKETPLACES", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.MockMarketplaces {
+		t.Fatal("MockMarketplaces должен быть true при MOCK_MARKETPLACES=true")
+	}
+}
+
+func TestLoad_MockMarketplacesRejectedInProd(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ENVIRONMENT", "prod")
+	t.Setenv("MAILER_MODE", "smtp")
+	t.Setenv("SMTP_HOST", "smtp.example.com")
+	t.Setenv("SMTP_USER", "user@example.com")
+	t.Setenv("SMTP_PASSWORD", "pwd")
+	t.Setenv("SMTP_FROM", "from@example.com")
+	t.Setenv("VERIFICATION_URL_BASE", "https://app.example.ru/verify")
+	t.Setenv("PASSWORD_RESET_URL_BASE", "https://app.example.ru/reset")
+	t.Setenv("MOCK_MARKETPLACES", "true")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want MOCK_MARKETPLACES запрещён в prod")
+	}
+	if !strings.Contains(err.Error(), "MOCK_MARKETPLACES") {
+		t.Fatalf("error = %q, want MOCK_MARKETPLACES error", err.Error())
+	}
+}

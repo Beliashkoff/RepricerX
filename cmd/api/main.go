@@ -42,6 +42,7 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/config"
 	"github.com/Beliashkoff/RepricerX/internal/domain"
 	"github.com/Beliashkoff/RepricerX/internal/integration"
+	"github.com/Beliashkoff/RepricerX/internal/integration/mock"
 	"github.com/Beliashkoff/RepricerX/internal/integration/oauth"
 	"github.com/Beliashkoff/RepricerX/internal/integration/oauth/vkid"
 	"github.com/Beliashkoff/RepricerX/internal/integration/oauth/yandex"
@@ -131,32 +132,36 @@ func main() {
 
 	limiter := ratelimit.New(5.0)
 
-	shopService := shopsvc.New(shopsRepo, intLogRepo, cfg.AppSecretKey, map[string]shopsvc.MarketplaceFactory{
-		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
+	type marketplaceBuilder = func(shopID string, credsJSON []byte) (integration.Marketplace, error)
+	var mkWB, mkOzon marketplaceBuilder
+	if cfg.MockMarketplaces {
+		log.Warn("⚠ MOCK_MARKETPLACES=true — реальные адаптеры WB/Ozon отключены, используются in-memory заглушки")
+		mockStore := mock.NewStore()
+		mkWB = mock.NewBuilder(mockStore, "wb")
+		mkOzon = mock.NewBuilder(mockStore, "ozon")
+	} else {
+		mkWB = func(shopID string, b []byte) (integration.Marketplace, error) {
 			return wildberries.NewClient(shopID, b, limiter)
-		},
-		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
+		}
+		mkOzon = func(shopID string, b []byte) (integration.Marketplace, error) {
 			return ozon.NewClient(shopID, b, limiter)
-		},
+		}
+	}
+
+	shopService := shopsvc.New(shopsRepo, intLogRepo, cfg.AppSecretKey, map[string]shopsvc.MarketplaceFactory{
+		"wb":   mkWB,
+		"ozon": mkOzon,
 	})
 	strategyService := strategysvc.New(strategiesRepo, assignmentsRepo)
 	plansRepo := repository.NewPricePlansRepository(pool)
 	pricingMarketplaceFactories := map[string]pricingsvc.MarketplaceFactory{
-		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
-			return wildberries.NewClient(shopID, b, limiter)
-		},
-		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
-			return ozon.NewClient(shopID, b, limiter)
-		},
+		"wb":   mkWB,
+		"ozon": mkOzon,
 	}
 	// Этап 6: dispatcher (отправка цен в МП).
 	dispatcherFactories := map[string]dispatchersvc.MarketplaceFactory{
-		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
-			return wildberries.NewClient(shopID, b, limiter)
-		},
-		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
-			return ozon.NewClient(shopID, b, limiter)
-		},
+		"wb":   mkWB,
+		"ozon": mkOzon,
 	}
 	notifierService := notifiersvc.New(notifiersvc.Deps{
 		Pool:          pool,
@@ -203,12 +208,8 @@ func main() {
 	auditService := auditsvc.New(priceChangesRepo)
 
 	productService := productsvc.New(shopsRepo, productsRepo, importLogRepo, jobsRepo, cfg.AppSecretKey, map[string]productsvc.MarketplaceFactory{
-		"wb": func(shopID string, b []byte) (integration.Marketplace, error) {
-			return wildberries.NewClient(shopID, b, limiter)
-		},
-		"ozon": func(shopID string, b []byte) (integration.Marketplace, error) {
-			return ozon.NewClient(shopID, b, limiter)
-		},
+		"wb":   mkWB,
+		"ozon": mkOzon,
 	}, productsvc.WithImportMaxAttempts(cfg.WorkerMaxAttempts), productsvc.WithNotifier(notifierService))
 
 	svc := authsvc.New(usersRepo, sessionsRepo, verRepo, resetRepo, m, audit, authsvc.Config{

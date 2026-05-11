@@ -55,6 +55,7 @@ services:
       TELEGRAM_BOT_START_URL: ${TELEGRAM_BOT_START_URL:-}
       VERIFICATION_URL_BASE: ${VERIFICATION_URL_BASE:-http://localhost:5173/verify}
       PASSWORD_RESET_URL_BASE: ${PASSWORD_RESET_URL_BASE:-http://localhost:5173/reset-password}
+      MOCK_MARKETPLACES: ${MOCK_MARKETPLACES:-false}
     depends_on:
       db:
         condition: service_healthy
@@ -88,6 +89,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       VERIFICATION_URL_BASE: ${VERIFICATION_URL_BASE:-http://localhost:5173/verify}
       PASSWORD_RESET_URL_BASE: ${PASSWORD_RESET_URL_BASE:-http://localhost:5173/reset-password}
+      MOCK_MARKETPLACES: ${MOCK_MARKETPLACES:-false}
     depends_on:
       db:
         condition: service_healthy
