@@ -21,11 +21,11 @@ const NAV_ITEMS = [
 
 function Logo() {
   return (
-    <Link to="/dashboard" className="flex items-center gap-2 font-bold text-2xl text-[#111] select-none">
+    <Link to="/dashboard" className="flex items-center gap-2 font-bold text-xl text-[#111] select-none">
       <img
         src="/logo.png"
         alt="RepricerX logo"
-        className="w-16 h-16 rounded-lg object-contain pointer-events-none"
+        className="w-10 h-10 rounded-lg object-contain pointer-events-none flex-none"
         draggable={false}
       />
       <span>
