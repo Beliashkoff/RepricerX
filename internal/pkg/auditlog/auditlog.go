@@ -137,6 +137,28 @@ func (l *Logger) PasswordResetUsed(userID uuid.UUID, revokedSessions int64) {
 	)
 }
 
+// OAuthExchangeFailed — провайдер OAuth (VK / Яндекс) отверг token exchange
+// или user_info-запрос. WARN: помогает диагностировать неправильные scope,
+// device_id, redirect_uri и т.п.
+func (l *Logger) OAuthExchangeFailed(provider, reason string) {
+	l.log.Warn("oauth_exchange_failed",
+		slog.String("provider", provider),
+		slog.String("reason", truncate(reason, 200)),
+	)
+}
+
+// OAuthCompleted — успешно отработали callback OAuth-провайдера.
+// INFO: нормальный поток, фиксируем флаги для диагностики (new_user — создан
+// новый аккаунт; link_required — email конфликт, ждём подтверждения пароля).
+func (l *Logger) OAuthCompleted(provider string, userID uuid.UUID, isNewUser, linkRequired bool) {
+	l.log.Info("oauth_completed",
+		slog.String("provider", provider),
+		slog.String("user_id", userID.String()),
+		slog.Bool("new_user", isNewUser),
+		slog.Bool("link_required", linkRequired),
+	)
+}
+
 func truncate(s string, maxLen int) string {
 	runes := []rune(s)
 	if len(runes) > maxLen {

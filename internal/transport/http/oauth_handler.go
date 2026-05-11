@@ -96,7 +96,7 @@ func (h *OAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	login, link, err := h.svc.CompleteOAuth(c.Request.Context(), c.Request, state, code)
+	login, link, err := h.svc.CompleteOAuth(c.Request.Context(), c.Request, state, code, c.Request.URL.Query())
 	if err != nil {
 		h.redirectFromAuthErr(c, err)
 		return

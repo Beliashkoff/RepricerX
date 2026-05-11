@@ -79,9 +79,14 @@ func (c *Client) AuthorizationURL(state, codeChallenge string) string {
 }
 
 // Exchange обменивает authorization code на access_token.
-// VK ID требует PKCE: code_verifier должен совпадать с тем, что
-// использовался при генерации code_challenge для AuthorizationURL.
-func (c *Client) Exchange(ctx context.Context, code, codeVerifier string) (string, error) {
+// VK ID OAuth 2.1 требует PKCE (code_verifier) И device_id — последний
+// возвращается провайдером в callback URL и обязателен в token request.
+func (c *Client) Exchange(ctx context.Context, code, codeVerifier string, callback url.Values) (string, error) {
+	deviceID := strings.TrimSpace(callback.Get("device_id"))
+	if deviceID == "" {
+		return "", fmt.Errorf("vkid: device_id отсутствует в callback: %w", oauth.ErrProviderRejected)
+	}
+
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
@@ -89,6 +94,7 @@ func (c *Client) Exchange(ctx context.Context, code, codeVerifier string) (strin
 	form.Set("client_secret", c.clientSecret)
 	form.Set("redirect_uri", c.redirectURI)
 	form.Set("code_verifier", codeVerifier)
+	form.Set("device_id", deviceID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.tokenURL,
 		strings.NewReader(form.Encode()))

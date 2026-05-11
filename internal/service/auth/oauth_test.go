@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -53,7 +54,7 @@ func (p *fakeProvider) AuthorizationURL(state, codeChallenge string) string {
 	return u
 }
 
-func (p *fakeProvider) Exchange(_ context.Context, code, codeVerifier string) (string, error) {
+func (p *fakeProvider) Exchange(_ context.Context, code, codeVerifier string, _ url.Values) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.lastCode = code
@@ -277,7 +278,7 @@ func TestCompleteOAuth_CreatesNewUserAndSession(t *testing.T) {
 	}
 
 	r := httptest.NewRequest("GET", "/cb", nil)
-	login, link, err := d.svc.CompleteOAuth(context.Background(), r, state, "code-1")
+	login, link, err := d.svc.CompleteOAuth(context.Background(), r, state, "code-1", url.Values{})
 	if err != nil {
 		t.Fatalf("CompleteOAuth: %v", err)
 	}
@@ -326,7 +327,7 @@ func TestCompleteOAuth_RepeatLoginExistingIdentity(t *testing.T) {
 	d.provider.tokenForCode["c"] = "t"
 	d.provider.userForToken["t"] = domain.OAuthUserInfo{ProviderUserID: "ya-7", Email: user.Email}
 
-	login, link, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), state, "c")
+	login, link, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), state, "c", url.Values{})
 	if err != nil {
 		t.Fatalf("CompleteOAuth: %v", err)
 	}
@@ -353,7 +354,7 @@ func TestCompleteOAuth_EmailConflictReturnsLinkRequest(t *testing.T) {
 		ProviderUserID: "ya-99", Email: "bob@example.com", DisplayName: "Boby",
 	}
 
-	login, link, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), state, "c")
+	login, link, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), state, "c", url.Values{})
 	if err != nil {
 		t.Fatalf("CompleteOAuth: %v", err)
 	}
@@ -381,7 +382,7 @@ func TestCompleteOAuth_EmailConflictReturnsLinkRequest(t *testing.T) {
 
 func TestCompleteOAuth_InvalidState(t *testing.T) {
 	d := newOAuthTestDeps(t, domain.OAuthProviderYandex)
-	_, _, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), "bogus", "c")
+	_, _, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), "bogus", "c", url.Values{})
 	if !errors.Is(err, authsvc.ErrInvalidOAuthState) {
 		t.Fatalf("ожидалось ErrInvalidOAuthState, got %v", err)
 	}
@@ -395,7 +396,7 @@ func TestCompleteOAuth_ProviderFailure(t *testing.T) {
 	}, time.Minute)
 	d.provider.exchangeErr = oauth.ErrProviderUnavailable
 
-	_, _, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), state, "c")
+	_, _, err := d.svc.CompleteOAuth(context.Background(), httptest.NewRequest("GET", "/cb", nil), state, "c", url.Values{})
 	if !errors.Is(err, authsvc.ErrOAuthProviderFailed) {
 		t.Fatalf("ожидалось ErrOAuthProviderFailed, got %v", err)
 	}

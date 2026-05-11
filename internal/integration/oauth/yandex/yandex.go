@@ -27,7 +27,11 @@ const (
 	defaultAuthorizeURL = "https://oauth.yandex.ru/authorize"
 	defaultTokenURL     = "https://oauth.yandex.ru/token"
 	defaultUserInfoURL  = "https://login.yandex.ru/info"
-	defaultScope        = "login:email login:info"
+	// Минимально нужное: login:email. login:info требует отдельной галочки
+	// в кабинете приложения; если её нет — Яндекс отказывает invalid_scope.
+	// display_name мы выводим из login (короткий ник), который доступен и
+	// без login:info — см. fallback в FetchUser.
+	defaultScope = "login:email"
 )
 
 // Client — адаптер Яндекс ID.
@@ -77,7 +81,7 @@ func (c *Client) AuthorizationURL(state, codeChallenge string) string {
 	return c.authorizeURL + "?" + q.Encode()
 }
 
-func (c *Client) Exchange(ctx context.Context, code, codeVerifier string) (string, error) {
+func (c *Client) Exchange(ctx context.Context, code, codeVerifier string, _ url.Values) (string, error) {
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)

@@ -3,11 +3,14 @@ package vkid
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/Beliashkoff/RepricerX/internal/integration/oauth"
 )
 
 func TestAuthorizationURL_HasRequiredPKCEParams(t *testing.T) {
@@ -33,7 +36,7 @@ func TestAuthorizationURL_HasRequiredPKCEParams(t *testing.T) {
 	}
 }
 
-func TestExchange_SendsPKCEVerifier(t *testing.T) {
+func TestExchange_SendsPKCEVerifierAndDeviceID(t *testing.T) {
 	var seenForm url.Values
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -43,7 +46,8 @@ func TestExchange_SendsPKCEVerifier(t *testing.T) {
 	defer srv.Close()
 
 	c := NewWithEndpoints("cid", "sec", "https://app/cb", "x", srv.URL, "x")
-	tok, err := c.Exchange(context.Background(), "auth-code", "the-verifier")
+	callback := url.Values{"device_id": {"dev-123"}}
+	tok, err := c.Exchange(context.Background(), "auth-code", "the-verifier", callback)
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -55,6 +59,22 @@ func TestExchange_SendsPKCEVerifier(t *testing.T) {
 	}
 	if seenForm.Get("grant_type") != "authorization_code" {
 		t.Errorf("grant_type = %q", seenForm.Get("grant_type"))
+	}
+	// VK ID OAuth 2.1 требует device_id в token request — без него VK отказывает.
+	if seenForm.Get("device_id") != "dev-123" {
+		t.Errorf("device_id = %q, ожидался dev-123", seenForm.Get("device_id"))
+	}
+}
+
+func TestExchange_RejectsWithoutDeviceID(t *testing.T) {
+	// httptest-сервер не нужен: адаптер должен упасть до сетевого запроса.
+	c := NewWithEndpoints("cid", "sec", "https://app/cb", "x", "http://unused", "x")
+	_, err := c.Exchange(context.Background(), "code", "verifier", url.Values{})
+	if err == nil {
+		t.Fatalf("ожидалась ошибка при отсутствии device_id")
+	}
+	if !errors.Is(err, oauth.ErrProviderRejected) {
+		t.Errorf("ожидался ErrProviderRejected, got %v", err)
 	}
 }
 

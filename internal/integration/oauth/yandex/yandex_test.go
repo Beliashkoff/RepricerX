@@ -46,7 +46,7 @@ func TestExchange_FormsRequestAndParsesResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := NewWithEndpoints("cid", "sec", "https://app/cb", "x", srv.URL, "x")
-	tok, err := c.Exchange(context.Background(), "code-123", "ver-456")
+	tok, err := c.Exchange(context.Background(), "code-123", "ver-456", url.Values{})
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestExchange_RejectsNon200(t *testing.T) {
 	defer srv.Close()
 
 	c := NewWithEndpoints("cid", "sec", "https://app/cb", "x", srv.URL, "x")
-	_, err := c.Exchange(context.Background(), "c", "v")
+	_, err := c.Exchange(context.Background(), "c", "v", url.Values{})
 	if err == nil {
 		t.Fatalf("ожидалась ошибка")
 	}

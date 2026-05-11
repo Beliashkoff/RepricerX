@@ -65,10 +65,11 @@ make down    # остановить dev-сервисы
 
 В RepricerX поддерживаются вход и регистрация через **VK ID** и **Яндекс ID**. Поток — серверный Authorization Code Flow с PKCE (S256), state и PKCE-verifier хранятся в Redis с TTL 10 минут. БД-таблица `oauth_identities` связывает внешний `(provider, external_id)` с локальным пользователем (миграция `000015`).
 
-**1. Регистрация приложений у провайдеров.** Без `client_id`/`client_secret` хендлер вернёт 503 — провайдеры опциональны.
+**1. Регистрация приложений у провайдеров.** Без `client_id`/`client_secret` хендлер вернёт 503 — провайдеры опциональны. Оба провайдера требуют **HTTPS** в redirect URI (localhost не примут).
 
-- **VK ID** — https://id.vk.com/about/business/go: создайте «Веб-приложение» и в «Доверенные redirect URI» укажите `<OAUTH_CALLBACK_BASE_URL>/api/auth/oauth/vk/callback` (в dev: `http://localhost:8080/api/auth/oauth/vk/callback`). Запросите доступ к email. Скопируйте идентификатор приложения и защищённый ключ.
-- **Яндекс ID** — https://oauth.yandex.ru/client/new: создайте «Веб-сервисы», тот же `redirect_uri`, доступы — «Доступ к email» (`login:email`) и «Доступ к логину, имени и фамилии, полу» (`login:info`).
+- **VK ID** — https://id.vk.com/about/business/go: создайте «Веб-приложение» и в «Доверенные redirect URI» укажите `<OAUTH_CALLBACK_BASE_URL>/api/auth/oauth/vk/callback`. Запросите доступ к **email**. Скопируйте идентификатор приложения и защищённый ключ.
+  - Адаптер сам передаёт обязательный для VK ID OAuth 2.1 параметр `device_id` (приходит в callback URL рядом с `code`/`state`) — никакой ручной настройки не требуется.
+- **Яндекс ID** — https://oauth.yandex.ru/client/new: создайте «Веб-сервисы», тот же `redirect_uri`. По умолчанию мы запрашиваем только `login:email` — поставьте эту галочку в кабинете. Если в кабинете отмечено больше прав, чем мы запрашиваем — это ОК; обратное приводит к ошибке `invalid_scope`. Проверить, что отмечено: открыть `https://oauth.yandex.ru/client/<client_id>/info`.
 
 **2. Переменные окружения.** Список см. в `.env.example`:
 

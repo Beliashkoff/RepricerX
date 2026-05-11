@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -96,32 +97,41 @@ func (s *Service) BeginOAuth(ctx context.Context, provider domain.OAuthProvider)
 // CompleteOAuth завершает поток. Возвращает либо LoginResult (создана сессия),
 // либо OAuthLinkRequest (нужна привязка с подтверждением паролем). Точно один
 // из двух будет ненулевым при err == nil.
-func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, state, code string) (*LoginResult, *OAuthLinkRequest, error) {
+//
+// callback — полный query string из callback URL: используется для провайдеро-
+// специфичных параметров (VK ID OAuth 2.1 возвращает device_id, обязательный
+// для token exchange). Адаптеры, которым ничего не нужно, игнорируют.
+func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, state, code string, callback url.Values) (*LoginResult, *OAuthLinkRequest, error) {
 	if s.oauthStore == nil || s.oauthProviders == nil || s.oauthIdentities == nil {
 		return nil, nil, ErrOAuthDisabled
 	}
 
 	statePayload, err := s.oauthStore.ConsumeState(ctx, state)
 	if err != nil {
+		s.audit.OAuthExchangeFailed("unknown", "invalid_state")
 		return nil, nil, ErrInvalidOAuthState
 	}
 
 	provider, ok := s.oauthProviders[statePayload.Provider]
 	if !ok {
+		s.audit.OAuthExchangeFailed(string(statePayload.Provider), "unknown_provider")
 		return nil, nil, ErrUnknownOAuthProvider
 	}
 
-	accessToken, err := provider.Exchange(ctx, code, statePayload.CodeVerifier)
+	accessToken, err := provider.Exchange(ctx, code, statePayload.CodeVerifier, callback)
 	if err != nil {
+		s.audit.OAuthExchangeFailed(string(statePayload.Provider), "exchange:"+err.Error())
 		return nil, nil, fmt.Errorf("%w: %v", ErrOAuthProviderFailed, err)
 	}
 
 	info, err := provider.FetchUser(ctx, accessToken)
 	if err != nil {
+		s.audit.OAuthExchangeFailed(string(statePayload.Provider), "user_info:"+err.Error())
 		return nil, nil, fmt.Errorf("%w: %v", ErrOAuthProviderFailed, err)
 	}
 	info.Email = strings.ToLower(strings.TrimSpace(info.Email))
 	if info.ProviderUserID == "" {
+		s.audit.OAuthExchangeFailed(string(statePayload.Provider), "empty_provider_user_id")
 		return nil, nil, ErrOAuthProviderFailed
 	}
 
@@ -141,6 +151,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, state, cod
 		if lerr != nil {
 			return nil, nil, lerr
 		}
+		s.audit.OAuthCompleted(string(statePayload.Provider), user.ID, false, false)
 		return login, nil, nil
 	} else if !errors.Is(err, repository.ErrNotFound) {
 		return nil, nil, fmt.Errorf("oauth: lookup identity: %w", err)
@@ -171,6 +182,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, state, cod
 				}, linkTTL); perr != nil {
 					return nil, nil, fmt.Errorf("oauth: save link: %w", perr)
 				}
+				s.audit.OAuthCompleted(string(statePayload.Provider), existing.ID, false, true)
 				return nil, &OAuthLinkRequest{
 					LinkToken: linkToken,
 					Email:     existing.Email,
@@ -193,6 +205,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, state, cod
 			if lerr != nil {
 				return nil, nil, lerr
 			}
+			s.audit.OAuthCompleted(string(statePayload.Provider), existing.ID, false, false)
 			return login, nil, nil
 		} else if !errors.Is(lookupErr, repository.ErrNotFound) {
 			return nil, nil, fmt.Errorf("oauth: lookup user by email: %w", lookupErr)
@@ -229,6 +242,7 @@ func (s *Service) CompleteOAuth(ctx context.Context, r *http.Request, state, cod
 	if lerr != nil {
 		return nil, nil, lerr
 	}
+	s.audit.OAuthCompleted(string(statePayload.Provider), newUser.ID, true, false)
 	return login, nil, nil
 }
 
