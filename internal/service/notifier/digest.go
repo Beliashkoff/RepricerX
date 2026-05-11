@@ -47,12 +47,15 @@ func (s *Service) FlushDigests(ctx context.Context, channel string, now time.Tim
 		if settings.DigestWindowMinutes <= 0 {
 			continue
 		}
-		// Окно ещё не закрыто?
+		// Окно ещё не закрыто? Если дайджест ни разу не отправлялся,
+		// считаем окно от момента настройки канала. Иначе первая же запись
+		// улетит на ближайшем */5 scheduler tick, что выглядит как спам.
+		baseline := settings.UpdatedAt
 		if settings.DigestSentAt != nil {
-			elapsed := now.Sub(*settings.DigestSentAt)
-			if elapsed < time.Duration(settings.DigestWindowMinutes)*time.Minute {
-				continue
-			}
+			baseline = *settings.DigestSentAt
+		}
+		if now.Sub(baseline) < time.Duration(settings.DigestWindowMinutes)*time.Minute {
+			continue
 		}
 		// Quiet hours?
 		if IsInQuietHours(now, settings) {

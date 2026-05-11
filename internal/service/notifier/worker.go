@@ -92,7 +92,7 @@ func (s *Service) ExecuteDigestJob(ctx context.Context, job *domain.BackgroundJo
 		return s.markBatchStatus(ctx, p.DeliveryIDs, domain.NotificationDeliveryStatusSkipped, "unknown channel")
 	}
 
-	_, notifications, err := s.deps.Deliveries.LoadByIDs(ctx, p.DeliveryIDs)
+	deliveries, notifications, err := s.deps.Deliveries.LoadByIDs(ctx, p.DeliveryIDs)
 	if err != nil {
 		return fmt.Errorf("notifier: load digest items: %w", err)
 	}
@@ -100,24 +100,52 @@ func (s *Service) ExecuteDigestJob(ctx context.Context, job *domain.BackgroundJo
 		log.Info("notifier: digest empty")
 		return nil
 	}
+	pendingIDs, pendingNotifications := digestPendingItems(deliveries, notifications)
+	if len(pendingNotifications) == 0 {
+		log.Info("notifier: digest already finalized")
+		return nil
+	}
 
-	if err := channel.DigestDeliver(ctx, p.UserID, notifications); err != nil {
+	if err := channel.DigestDeliver(ctx, p.UserID, pendingNotifications); err != nil {
 		if errors.Is(err, ErrSkip) || errors.Is(err, ErrDigestNotSupported) {
 			log.Info("notifier: digest skipped", "reason", err.Error())
-			return s.markBatchStatus(ctx, p.DeliveryIDs, domain.NotificationDeliveryStatusSkipped, err.Error())
+			if err := s.markBatchStatus(ctx, pendingIDs, domain.NotificationDeliveryStatusSkipped, err.Error()); err != nil {
+				log.Warn("notifier: mark digest skipped", "err", err)
+			}
+			return nil
 		}
 		// Возвращаем ошибку — worker устроит retry; статус оставляем
 		// queued_digest до повторной попытки.
 		return err
 	}
 
-	if err := s.markBatchStatus(ctx, p.DeliveryIDs, domain.NotificationDeliveryStatusSent, ""); err != nil {
-		return err
+	// Письмо уже ушло. Ошибки финализации статусов нельзя возвращать как
+	// retryable, иначе worker повторно отправит тот же digest.
+	if err := s.markBatchStatus(ctx, pendingIDs, domain.NotificationDeliveryStatusSent, ""); err != nil {
+		log.Warn("notifier: mark digest sent", "err", err)
 	}
 	if err := s.deps.ChannelSet.MarkDigestSent(ctx, p.UserID, p.Channel, s.now()); err != nil {
 		log.Warn("notifier: mark digest sent_at", "err", err)
 	}
 	return nil
+}
+
+func digestPendingItems(deliveries []*domain.NotificationDelivery, notifications []*domain.Notification) ([]uuid.UUID, []*domain.Notification) {
+	if len(deliveries) != len(notifications) {
+		return nil, notifications
+	}
+	ids := make([]uuid.UUID, 0, len(deliveries))
+	items := make([]*domain.Notification, 0, len(notifications))
+	for i, d := range deliveries {
+		switch d.Status {
+		case domain.NotificationDeliveryStatusSent, domain.NotificationDeliveryStatusSkipped, domain.NotificationDeliveryStatusFailed:
+			continue
+		default:
+			ids = append(ids, d.ID)
+			items = append(items, notifications[i])
+		}
+	}
+	return ids, items
 }
 
 func (s *Service) markBatchStatus(ctx context.Context, ids []uuid.UUID, status, reason string) error {
