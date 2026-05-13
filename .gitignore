@@ -54,3 +54,15 @@ web/.env.local
 .vscode/
 
 # Local agent settings
+.codex/
+CLAUDE.md
+AGENTS.md
+CODEX.md
+.cursor/
+.cursorrules
+.aider*
+.windsurf/
+
+# Local doc/TZ generation workspaces
+TZGeneration/
+hse-coursework-docs/
