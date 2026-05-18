@@ -1,137 +1,202 @@
 # RepricerX
-Курсовая работа 2 курса НИУ "ВШЭ" ФКН программной инженерии, студента Зуева Акима 
-# Описание 
-Проект посвящен умному изменению цены на маркетплейсах Wildberries и Ozon
-С помощью данного сервиса продавец на данной площадке может выбрать разные стратегии для своего товара: 
-- Следование за конкурентом
-- Фиксирование константы
 
-# Актуальный план
-MVP для сдачи должен быть готов до 10.05.2026. Подробный технический план и текущий статус задач ведутся в `CLAUDE.md`.
+Веб-сервис автоматического управления ценами на маркетплейсах **Wildberries** и **Ozon**.
+Продавец подключает магазины по API-ключам, импортирует SKU, задаёт стратегии ценообразования
+(следование за конкурентом, поддержание маржи, фиксированная цена), а сервис собирает
+рыночные данные, рассчитывает рекомендуемые цены в рамках ограничений (min/max, max change, маржа),
+отправляет обновления в маркетплейсы и ведёт журнал изменений.
 
-# Локальный запуск
+## Стек
+
+| Слой       | Технологии |
+|------------|------------|
+| Backend    | Go 1.24, Gin, pgx/v5 (без ORM), robfig/cron v3 |
+| Frontend   | React 18, Vite, TypeScript, TanStack Query |
+| Хранилища  | PostgreSQL 16, Redis 7 |
+| Миграции   | golang-migrate (чистый SQL) |
+| Инфра      | Docker Compose, nginx (reverse proxy в prod) |
+| Аутентификация | Серверные сессии в cookie, OAuth (VK ID, Яндекс ID) с PKCE |
+
+## Архитектура
+
+Два бинаря, общие `internal/` пакеты, общая БД и Redis:
+
+- `cmd/api` — HTTP-сервер.
+- `cmd/worker` — фоновый обработчик задач (импорт SKU, рассылка цен, ретраи).
+- `cmd/scheduler` — cron-планировщик (рыночные данные, плановый пересчёт, ротация логов).
+- `cmd/bot` — Telegram-бот для notifier-канала.
+- `cmd/migrate`, `cmd/credbackfill` — служебные утилиты.
+
+Слойка (сверху вниз):
+
+```
+transport/http/      handlers, middleware (auth, CSRF, rate-limit), DTO
+service/             auth, shop, product, competitor, strategy, pricing,
+                     dispatcher, audit, notifier — бизнес-логика
+repository/*_pg.go   pgx-реализации интерфейсов
+domain/              чистые структуры
+integration/{wildberries,ozon}  адаптеры Marketplace (TestAuth, ListSKUs, UpdatePrice)
+integration/oauth/{vkid,yandex} OAuth-провайдеры
+internal/pkg/        crypto (AES-256-GCM), password (argon2id), token, mailer,
+                     ratelimit, redislimit, dblock, auditlog, oauthstate
+```
+
+**Принципы:**
+- Sentinel-ошибки репозитория → ошибки сервиса → HTTP-статусы в `transport/http/errors.go`. Репозиторные ошибки не утекают в хендлеры.
+- API-ключи магазинов хранятся только в виде AES-256-GCM шифротекста; ключ — из `APP_SECRET_KEY`.
+- CSRF: same-origin проверка `Origin` для всех мутаций (кроме публичной auth-группы).
+- Rate-limit: per-shop token bucket; HTTP 429 от маркетплейса → `integration.ErrRateLimited` → `shopsvc.ErrRateLimited` → 429 наружу.
+- Длинные операции (импорт, массовая рассылка цен) — через `background_jobs` (advisory lock), не в HTTP-хендлере.
+- Добавление маркетплейса = новый адаптер + ключ в `MarketplaceFactory` map в `cmd/api/main.go`.
+
+## Локальный запуск
+
 ```bash
 docker compose up --build
-```
-
-После старта доступны:
-- фронтенд: `http://localhost:5173`
-- API: `http://localhost:8080`
-- `GET http://localhost:8080/healthz`
-- `GET http://localhost:8080/ready`
-
-Для локальной разработки `docker-compose.yaml` поднимает Postgres, Redis, API, worker и Vite-фронтенд.
-Фронтенд монтируется из `./web`, поэтому изменения в React-коде применяются через Vite HMR без пересборки контейнера.
-Внутри Docker Vite проксирует `/api` и `/healthz` в `http://api:8080`; при запуске фронтенда напрямую на хосте используется `http://localhost:8080`.
-
-Полезные команды:
-```bash
+# или
 make up      # docker compose up -d --build
-make logs    # логи всех dev-сервисов
-make ps      # статус контейнеров
-make down    # остановить dev-сервисы
+make logs
+make down
 ```
 
-# REST API
+После старта:
 
-Базовый URL: `http://localhost:8080`  
-Полное описание с полями запросов/ответов и кодами ошибок — [`docs/api_endpoints.docx`](docs/api_endpoints.docx).
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:8080`
+- Liveness: `GET /healthz`
+- Readiness: `GET /ready` (Postgres + Redis)
+- Swagger UI: `http://localhost:8080/swagger/index.html`
 
-## Сервисные
+Vite внутри Docker проксирует `/api` и `/healthz` на `http://api:8080`. Фронтенд монтируется из `./web`,
+изменения подхватываются HMR без пересборки контейнера.
 
-| Метод | Путь       | Авторизация | Описание                                       |
-|-------|------------|-------------|------------------------------------------------|
-| GET   | `/healthz` | —           | Liveness probe — 200 пока процесс запущен      |
-| GET   | `/ready`   | —           | Readiness probe — проверяет Postgres и Redis   |
+## Сборка и тесты
 
-## Аутентификация `/api/auth`
+```bash
+go build -o api ./cmd/api
+go build -o worker ./cmd/worker
 
-| Метод | Путь                          | Авторизация | CSRF | Описание                                         |
-|-------|-------------------------------|-------------|------|--------------------------------------------------|
-| POST  | `/api/auth/register`          | —           | —    | Регистрация; отправляет письмо верификации        |
-| POST  | `/api/auth/login`             | —           | —    | Вход; устанавливает HttpOnly-cookie `session_token` |
-| POST  | `/api/auth/logout`            | cookie      | да   | Выход; инвалидирует сессию и удаляет cookie      |
-| GET   | `/api/auth/me`                | cookie      | —    | Профиль текущего пользователя                    |
-| PATCH | `/api/auth/me`                | cookie      | да   | Обновление `displayName`                         |
-| GET   | `/api/auth/verify?token=...`  | —           | —    | Подтверждение email; редирект на фронтенд        |
-| POST  | `/api/auth/verification/resend` | —         | —    | Повторная отправка письма верификации            |
-| POST  | `/api/auth/password/forgot`  | —           | —    | Запрос ссылки сброса пароля; всегда возвращает общий ответ |
-| POST  | `/api/auth/password/reset`   | —           | —    | Установка нового пароля по одноразовому токену   |
-| GET   | `/api/auth/oauth/:provider/start`    | — | — | Начало OAuth-логина: редирект на форму согласия VK ID / Яндекс ID |
-| GET   | `/api/auth/oauth/:provider/callback` | — | — | Callback провайдера; создаёт сессию или редиректит на `/link-oauth` |
-| POST  | `/api/auth/oauth/link`               | — | — | Подтверждение привязки OAuth-аккаунта паролем               |
+go test -race -cover ./...                                   # unit
+go test -tags=integration -race -v ./tests/integration/...   # нужен DATABASE_URL
 
-### OAuth: VK ID и Яндекс ID
+golangci-lint run ./...
 
-В RepricerX поддерживаются вход и регистрация через **VK ID** и **Яндекс ID**. Поток — серверный Authorization Code Flow с PKCE (S256), state и PKCE-verifier хранятся в Redis с TTL 10 минут. БД-таблица `oauth_identities` связывает внешний `(provider, external_id)` с локальным пользователем (миграция `000015`).
-
-**1. Регистрация приложений у провайдеров.** Без `client_id`/`client_secret` хендлер вернёт 503 — провайдеры опциональны. Оба провайдера требуют **HTTPS** в redirect URI (localhost не примут).
-
-- **VK ID** — https://id.vk.com/about/business/go: создайте «Веб-приложение» и в «Доверенные redirect URI» укажите `<OAUTH_CALLBACK_BASE_URL>/api/auth/oauth/vk/callback`. Запросите доступ к **email**. Скопируйте идентификатор приложения и защищённый ключ.
-  - Адаптер сам передаёт обязательный для VK ID OAuth 2.1 параметр `device_id` (приходит в callback URL рядом с `code`/`state`) — никакой ручной настройки не требуется.
-- **Яндекс ID** — https://oauth.yandex.ru/client/new: создайте «Веб-сервисы», тот же `redirect_uri`. По умолчанию мы запрашиваем только `login:email` — поставьте эту галочку в кабинете. Если в кабинете отмечено больше прав, чем мы запрашиваем — это ОК; обратное приводит к ошибке `invalid_scope`. Проверить, что отмечено: открыть `https://oauth.yandex.ru/client/<client_id>/info`.
-
-**2. Переменные окружения.** Список см. в `.env.example`:
-
-```
-OAUTH_VK_CLIENT_ID, OAUTH_VK_CLIENT_SECRET
-OAUTH_YANDEX_CLIENT_ID, OAUTH_YANDEX_CLIENT_SECRET
-OAUTH_CALLBACK_BASE_URL=http://localhost:8080
-OAUTH_FRONTEND_BASE_URL=http://localhost:5173
+make migrate    # применяет миграции напрямую, нужен DATABASE_URL
+make swag       # перегенерация docs/ из swag-аннотаций
 ```
 
-**3. Конфликт email.** Если провайдер возвращает email, который уже занят email/password-аккаунтом, callback вместо логина перенаправляет на `/link-oauth?token=…&email=…&provider=…`. Пользователь вводит пароль; backend проверяет его и создаёт связь `oauth_identities`, после чего выдаёт сессию.
+## Переменные окружения
 
-> Все ошибки возвращаются в формате `{"error":{"code":"...","message":"..."}}`.  
-> Мутирующие защищённые эндпоинты проверяют заголовок `Origin` (same-origin CSRF).
+Обязательные: `DATABASE_URL`, `APP_SECRET_KEY`, `REDIS_ADDR`.
+Полный список — `internal/config/config.go`. Основные группы:
 
-Для писем подтверждения и сброса пароля используется `MAILER_MODE=log` в dev или `MAILER_MODE=smtp` в prod. В dev-режиме письмо не отправляется наружу, а пишется в логи API, которые можно посмотреть через `make logs` или `docker compose logs api`. На сервере запуск идёт через `docker-compose.prod.yaml`; для реальной SMTP-отправки в `.env.prod` нужны `MAILER_MODE=smtp`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`. Ссылка сброса пароля настраивается через `PASSWORD_RESET_URL_BASE`, например `https://example.com/reset-password`; токен добавляется в fragment (`#token=...`) и в prod не должен попадать в серверные логи.
+- **CORS/CSRF:** `ALLOWED_ORIGINS`, `TRUST_PROXY_HEADERS`.
+- **Сессии:** `SESSION_IDLE_TTL` (24h), `SESSION_ABSOLUTE_TTL` (168h).
+- **Почта:** `MAILER_MODE=log|smtp`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `VERIFICATION_URL_BASE`, `PASSWORD_RESET_URL_BASE`.
+- **Worker:** `WORKER_CONCURRENCY`, `WORKER_POLL_INTERVAL`, `WORKER_LOCK_TTL`, `WORKER_JOB_TIMEOUT`, `WORKER_MAX_ATTEMPTS`.
+- **OAuth:** `OAUTH_VK_CLIENT_ID/SECRET`, `OAUTH_YANDEX_CLIENT_ID/SECRET`, `OAUTH_CALLBACK_BASE_URL`, `OAUTH_FRONTEND_BASE_URL`.
+- **Telegram:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_START_URL`.
+- **HTTP:** `MAX_BODY_BYTES` (1 MiB по умолчанию).
+- **Dev-only:** `MOCK_MARKETPLACES=true` подменяет WB/Ozon на in-memory заглушки.
 
-## Магазины `/api/shops`
+В prod (`ENVIRONMENT=prod`): обязательны `MAILER_MODE=smtp`, HTTPS-`VERIFICATION_URL_BASE`/`PASSWORD_RESET_URL_BASE`, `MOCK_MARKETPLACES=false`.
 
-| Метод  | Путь                  | Авторизация | CSRF | Описание                                              |
-|--------|-----------------------|-------------|------|-------------------------------------------------------|
-| GET    | `/api/shops`          | cookie      | —    | Список магазинов текущего пользователя                |
-| GET    | `/api/shops/:id`      | cookie      | —    | Один магазин (только свой)                            |
-| POST   | `/api/shops`          | cookie      | да   | Создать магазин; credentials шифруются AES-256-GCM    |
-| PATCH  | `/api/shops/:id`      | cookie      | да   | Обновить имя, credentials, расписание, auto-update    |
-| DELETE | `/api/shops/:id`      | cookie      | да   | Удалить магазин                                       |
-| POST   | `/api/shops/:id/test` | cookie      | да   | Проверить подключение к маркетплейсу; меняет статус   |
+## REST API
 
-Поддерживаемые маркетплейсы: `wb` (Wildberries), `ozon` (Ozon).  
-Поле `credentials` в теле запроса зависит от маркетплейса:
+Базовый URL: `http://localhost:8080`.
+Полный справочник — Swagger UI (`/swagger/index.html`) и [`docs/api_endpoints.docx`](docs/api_endpoints.docx).
+
+### Сервисные
+
+| Метод | Путь       | Описание                                       |
+|-------|------------|------------------------------------------------|
+| GET   | `/healthz` | Liveness — 200 пока процесс запущен            |
+| GET   | `/ready`   | Readiness — проверяет Postgres и Redis         |
+
+### Аутентификация `/api/auth`
+
+| Метод | Путь                                  | Auth   | CSRF | Описание |
+|-------|---------------------------------------|--------|------|----------|
+| POST  | `/register`                           | —      | —    | Регистрация; отправляет письмо верификации |
+| POST  | `/login`                              | —      | —    | Вход; ставит HttpOnly-cookie `rx_session` |
+| POST  | `/logout`                             | cookie | да   | Выход |
+| GET   | `/me`                                 | cookie | —    | Профиль текущего пользователя |
+| PATCH | `/me`                                 | cookie | да   | Обновление `displayName` |
+| GET   | `/verify?token=...`                   | —      | —    | Подтверждение email; редирект на фронтенд |
+| POST  | `/verification/resend`                | —      | —    | Повторная отправка письма верификации |
+| POST  | `/password/forgot`                    | —      | —    | Запрос ссылки сброса пароля |
+| POST  | `/password/reset`                     | —      | —    | Установка нового пароля по токену |
+| GET   | `/oauth/:provider/start`              | —      | —    | OAuth (vk \| yandex): редирект на форму согласия |
+| GET   | `/oauth/:provider/callback`           | —      | —    | OAuth callback: создаёт сессию или редиректит на `/link-oauth` |
+| POST  | `/oauth/link`                         | —      | —    | Подтверждение привязки OAuth к существующему email/password-аккаунту |
+
+**OAuth (VK ID, Яндекс ID).** Серверный Authorization Code Flow + PKCE (S256). State и PKCE-verifier хранятся в Redis с TTL 10 минут; внешние идентичности — в `oauth_identities` (миграция `000015`). При конфликте email с существующим email/password-аккаунтом callback редиректит на `/link-oauth?token=…&email=…&provider=…` — пользователь вводит пароль, backend создаёт связь и выдаёт сессию. Без `client_id`/`secret` соответствующий провайдер недоступен (503). Оба провайдера требуют HTTPS в redirect URI; адаптер VK ID сам передаёт обязательный `device_id` из callback URL.
+
+### Магазины `/api/shops`
+
+| Метод  | Путь            | CSRF | Описание |
+|--------|-----------------|------|----------|
+| GET    | `/`             | —    | Список магазинов пользователя |
+| GET    | `/:id`          | —    | Один магазин |
+| POST   | `/`             | да   | Создать; credentials шифруются AES-256-GCM |
+| PATCH  | `/:id`          | да   | Имя, credentials, расписание, auto-update |
+| DELETE | `/:id`          | да   | Удалить магазин |
+| POST   | `/:id/test`     | да   | Проверка подключения; меняет статус |
+| POST   | `/:id/run-now`  | да   | Ручной триггер пересчёта |
+| POST   | `/:id/products/import` | да | Запуск фоновой джобы импорта SKU |
+| POST   | `/:id/products` | да   | Ручное добавление продукта |
+
+Маркетплейсы: `wb`, `ozon`. Поле `credentials`:
 - **WB:** `{"api_key": "..."}`
 - **Ozon:** `{"client_id": "...", "api_key": "..."}`
 
 Статусы магазина: `draft` → `active` / `error` (после `/test`) → `disabled`.
 
-# Для разработчиков
-## Pull Request
-### Структура коммита
-<тип>(<область>): <короткое описание>
-### Нейминг как в коммитах
-### Доп. инфо:
-- Один PR = Одна фича.
-- Draft PR.
-- Self-review. 
-## Commit
-### Структура коммита
-При коммите изменений нужно руководствоваться данной структурой коммита: 
-<тип>(<область>): <короткое описание>
-<подробное описание (тело) - опционально> 
-<метаданные (футер) - опционально>
+### Прочее
 
-### Нейминг в коммитах
-| Тип      | Значение                                                     | Пример                                       |
-| -------- | ------------------------------------------------------------ | -------------------------------------------- |
-| feat     | Новая функциональность (feature)                             | feat: add dark mode support                  |
-| fix      | Исправление ошибки (bug fix)                                 | fix: resolve crash on login screen           |
-| docs     | Изменения в документации                                     | docs: update API references                  |
-| style    | Правки стиля (пробелы, форматирование, точки с запятой)      | style: format code with Prettier             |
-| refactor | Правка кода без исправления багов или добавления фич         | refactor: simplify user authentication logic |
-| test     | Добавление или исправление тестов                            | test: add unit tests for User service        |
-| chore    | Служебные задачи (обновление зависимостей, настройка сборки) | chore: update dependency versions            |
+- `/api/products`, `/api/products/export`, `/api/products/:id/competitors`, `/api/imports/:id` — каталог и импорт.
+- `/api/strategies`, `/api/strategies/:id/assignments` — стратегии и назначения.
+- `/api/pricing/simulate`, `/api/pricing/recalculate`, `/api/price-plans`, `/api/price-plans/:id/dispatch` — движок цен и план изменений.
+- `/api/audit/price-changes`, `/api/audit/price-changes.csv`, `/api/reports/summary` — журнал и отчёты.
+- `/api/notifications/*` — уведомления, настройки каналов (UI, Telegram, webhooks).
 
-### Доп. инфо: 
-- Один commit = Одна фича.
-- Self-review 
+Все ошибки — в формате `{"error":{"code":"...","message":"..."}}`. Мутирующие защищённые эндпоинты требуют same-origin `Origin`.
+
+## Production
+
+```bash
+make prod-up      # docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d
+make prod-logs
+make prod-down
+```
+
+Подробнее — [`docs/production-deploy.md`](docs/production-deploy.md).
+
+## Конвенции
+
+### Commit
+
+```
+<тип>(<область>): <короткое описание>
+[опциональное тело]
+[опциональный футер]
+```
+
+| Тип      | Когда |
+|----------|-------|
+| feat     | Новая функциональность |
+| fix      | Исправление ошибки |
+| docs     | Только документация |
+| style    | Форматирование, без изменения логики |
+| refactor | Рефакторинг без изменения поведения |
+| test     | Тесты |
+| chore    | Зависимости, конфиги, сборка |
+
+Один коммит = одна фича. Self-review обязателен.
+
+### Pull Request
+
+- Один PR = одна фича.
+- Draft PR до готовности.
+- Self-review перед запросом ревью.
+- Нейминг такой же, как у коммитов.
