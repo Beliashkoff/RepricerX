@@ -66,6 +66,9 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 		resp, err := c.http.Do(req)
 		if err != nil {
 			lastErr = err
+		} else if resp.StatusCode == http.StatusTooManyRequests {
+			_ = resp.Body.Close()
+			return nil, integration.ErrRateLimited
 		} else if resp.StatusCode >= 500 {
 			_ = resp.Body.Close()
 			lastErr = fmt.Errorf("wb: server error %d", resp.StatusCode)

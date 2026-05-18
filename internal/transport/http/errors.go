@@ -2,6 +2,7 @@ package transport
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -21,43 +22,45 @@ func errResp(c *gin.Context, httpStatus int, code, message string) {
 
 // handleAuthErr маппит ошибки сервиса auth в HTTP-ответы.
 func handleAuthErr(c *gin.Context, err error) {
-	switch err {
-	case auth.ErrInvalidEmail:
+	switch {
+	case errors.Is(err, auth.ErrInvalidEmail):
 		errResp(c, http.StatusBadRequest, "invalid_email", "Неверный формат email")
-	case auth.ErrWeakPassword:
+	case errors.Is(err, auth.ErrWeakPassword):
 		errResp(c, http.StatusBadRequest, "weak_password",
 			"Пароль должен быть от 8 до 128 символов и содержать букву и цифру")
-	case auth.ErrEmailTaken:
+	case errors.Is(err, auth.ErrEmailTaken):
 		errResp(c, http.StatusConflict, "email_taken", "Этот email уже зарегистрирован")
-	case auth.ErrInvalidCredentials:
+	case errors.Is(err, auth.ErrInvalidCredentials):
 		// Единственный ответ на все ошибки логина — не раскрываем причину.
 		errResp(c, http.StatusUnauthorized, "invalid_credentials", "Неверный email или пароль")
-	case auth.ErrInvalidResetToken:
+	case errors.Is(err, auth.ErrInvalidResetToken):
 		errResp(c, http.StatusBadRequest, "invalid_reset_token", "Ссылка сброса пароля недействительна или истекла")
-	case auth.ErrSessionNotFound:
+	case errors.Is(err, auth.ErrSessionNotFound):
 		errResp(c, http.StatusUnauthorized, "unauthorized", "Сессия не найдена или истекла")
-	case auth.ErrUserBlocked:
+	case errors.Is(err, auth.ErrUserBlocked):
 		errResp(c, http.StatusForbidden, "user_blocked", "Аккаунт заблокирован")
 	default:
+		slog.Error("handleAuthErr: unhandled error", "error", err, "path", c.Request.URL.Path)
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
 	}
 }
 
 // handleShopErr маппит ошибки сервиса shop в HTTP-ответы.
 func handleShopErr(c *gin.Context, err error) {
-	switch err {
-	case shopsvc.ErrShopNotFound:
+	switch {
+	case errors.Is(err, shopsvc.ErrShopNotFound):
 		errResp(c, http.StatusNotFound, "shop_not_found", "Магазин не найден")
-	case shopsvc.ErrInvalidMarketplace:
+	case errors.Is(err, shopsvc.ErrInvalidMarketplace):
 		errResp(c, http.StatusBadRequest, "invalid_marketplace", "Неизвестный маркетплейс")
-	case shopsvc.ErrInvalidCredentials:
+	case errors.Is(err, shopsvc.ErrInvalidCredentials):
 		errResp(c, http.StatusBadRequest, "invalid_credentials", "Некорректные учётные данные маркетплейса")
-	case shopsvc.ErrAuthFailed:
+	case errors.Is(err, shopsvc.ErrAuthFailed):
 		errResp(c, http.StatusUnprocessableEntity, "auth_failed", "Ошибка авторизации в маркетплейсе")
-	case shopsvc.ErrRateLimited:
+	case errors.Is(err, shopsvc.ErrRateLimited):
 		errResp(c, http.StatusTooManyRequests, "marketplace_rate_limited",
 			"Маркетплейс временно ограничил запросы, повторите позже")
 	default:
+		slog.Error("handleShopErr: unhandled error", "error", err, "path", c.Request.URL.Path)
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")
 	}
 }
