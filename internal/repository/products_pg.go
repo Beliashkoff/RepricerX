@@ -28,18 +28,16 @@ const productColumns = `p.id, p.shop_id, p.external_sku, p.vendor_code, p.name, 
 
 func (r *productsPg) Create(ctx context.Context, userID uuid.UUID, input ProductCreateInput) (*domain.Product, error) {
 	row := r.db.QueryRow(ctx, `
-		WITH ins AS (
-			INSERT INTO products
-				(shop_id, external_sku, name, current_price, currency, status,
-				 min_price, max_price, cost_price, created_at, updated_at)
-			SELECT $2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW()
-			FROM shops
-			WHERE id=$2 AND user_id=$1
-			RETURNING id
-		)
-		SELECT `+productColumns+`
-		FROM products p
-		WHERE p.id = (SELECT id FROM ins)`,
+		INSERT INTO products
+			(shop_id, external_sku, name, current_price, currency, status,
+			 min_price, max_price, cost_price, created_at, updated_at)
+		SELECT $2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW()
+		FROM shops
+		WHERE id=$2 AND user_id=$1
+		RETURNING id, shop_id, external_sku, vendor_code, name, current_price::float8, currency, status,
+		          min_price::float8, max_price::float8, cost_price::float8,
+		          stock_count, rating::float8, reviews_count, last_synced_at,
+		          false, created_at, updated_at`,
 		userID, input.ShopID, input.ExternalSKU, input.Name, input.CurrentPrice, input.Currency,
 		input.Status, input.MinPrice, input.MaxPrice, input.CostPrice,
 	)
@@ -111,19 +109,21 @@ func (r *productsPg) GetByIDForUser(ctx context.Context, userID, productID uuid.
 
 func (r *productsPg) PatchPrices(ctx context.Context, userID, productID uuid.UUID, patch ProductPricePatch) (*domain.Product, error) {
 	row := r.db.QueryRow(ctx, `
-		WITH upd AS (
-			UPDATE products p
-			SET min_price=CASE WHEN $3 THEN $4 ELSE min_price END,
-			    max_price=CASE WHEN $5 THEN $6 ELSE max_price END,
-			    cost_price=CASE WHEN $7 THEN $8 ELSE cost_price END,
-			    updated_at=NOW()
-			FROM shops s
-			WHERE p.shop_id=s.id AND p.id=$1 AND s.user_id=$2
-			RETURNING p.id
-		)
-		SELECT `+productColumns+`
-		FROM products p
-		WHERE p.id = (SELECT id FROM upd)`,
+		UPDATE products p
+		SET min_price=CASE WHEN $3 THEN $4 ELSE min_price END,
+		    max_price=CASE WHEN $5 THEN $6 ELSE max_price END,
+		    cost_price=CASE WHEN $7 THEN $8 ELSE cost_price END,
+		    updated_at=NOW()
+		FROM shops s
+		WHERE p.shop_id=s.id AND p.id=$1 AND s.user_id=$2
+		RETURNING p.id, p.shop_id, p.external_sku, p.vendor_code, p.name, p.current_price::float8,
+		          p.currency, p.status, p.min_price::float8, p.max_price::float8,
+		          p.cost_price::float8, p.stock_count, p.rating::float8,
+		          p.reviews_count, p.last_synced_at,
+		          EXISTS (
+		            SELECT 1 FROM strategy_assignments sa WHERE sa.product_id=p.id
+		          ) AS has_strategy,
+		          p.created_at, p.updated_at`,
 		productID, userID,
 		patch.MinPrice.Set, patch.MinPrice.Value,
 		patch.MaxPrice.Set, patch.MaxPrice.Value,
