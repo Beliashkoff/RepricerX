@@ -68,8 +68,8 @@ func newTestClient(common, content, prices string) *Client {
 
 func TestWB_TestAuth_Success(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/seller-info" {
-			t.Errorf("неожиданный путь: %s, ожидали /api/v1/seller-info", r.URL.Path)
+		if r.URL.Path != "/ping" {
+			t.Errorf("неожиданный путь: %s, ожидали /ping", r.URL.Path)
 		}
 		if r.Header.Get("Authorization") != "Bearer test-api-key" {
 			t.Errorf("Authorization: %q", r.Header.Get("Authorization"))

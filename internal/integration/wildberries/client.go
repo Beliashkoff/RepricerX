@@ -87,12 +87,14 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 	return nil, lastErr
 }
 
-// TestAuth проверяет валидность API-ключа запросом к /api/v1/seller-info.
-// Эндпоинт документирован в Common API: https://dev.wildberries.ru/openapi/api-information
+// TestAuth проверяет валидность API-ключа запросом к /ping (Common API).
+// Это документированный WB-эндпоинт connection-check: валидирует токен,
+// URL и соответствие категории сервису. Работает на любой Service-токен.
+// Лимит — 3 запроса/30 сек. https://dev.wildberries.ru/openapi/api-information
 func (c *Client) TestAuth(ctx context.Context) error {
 	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			commonBase+"/api/v1/seller-info", nil)
+			commonBase+"/ping", nil)
 		if err != nil {
 			return nil, fmt.Errorf("wb: build request: %w", err)
 		}
