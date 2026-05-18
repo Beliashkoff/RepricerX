@@ -59,6 +59,9 @@ func handleShopErr(c *gin.Context, err error) {
 	case errors.Is(err, shopsvc.ErrRateLimited):
 		errResp(c, http.StatusTooManyRequests, "marketplace_rate_limited",
 			"Маркетплейс временно ограничил запросы, повторите позже")
+	case errors.Is(err, shopsvc.ErrMarketplaceUnavailable):
+		errResp(c, http.StatusBadGateway, "marketplace_unavailable",
+			"Маркетплейс временно недоступен — попробуйте позже")
 	default:
 		slog.Error("handleShopErr: unhandled error", "error", err, "path", c.Request.URL.Path)
 		errResp(c, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка сервера")

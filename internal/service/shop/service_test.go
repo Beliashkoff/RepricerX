@@ -456,3 +456,24 @@ func TestTestConnection_UnknownAdapterErrorSanitizesIntegrationLog(t *testing.T)
 		t.Fatalf("integration log must use sanitized generic code, got %q", intLog.entries[0].ErrorText)
 	}
 }
+
+func TestTestConnection_UnexpectedStatusMapsToUnavailable(t *testing.T) {
+	repo := newFakeShopsRepo()
+	intLog := &fakeIntLogRepo{}
+	rawErr := fmt.Errorf("wb: unexpected status 404: %w", integration.ErrUnexpectedStatus)
+	svc := newSvcWithLog(repo, rawErr, intLog)
+	userID := uuid.New()
+
+	shop, _ := svc.Create(context.Background(), userID, "wb", "Shop", json.RawMessage(`{"api_key":"valid"}`))
+	err := svc.TestConnection(context.Background(), userID, shop.ID)
+	if err != shopsvc.ErrMarketplaceUnavailable {
+		t.Fatalf("want ErrMarketplaceUnavailable, got %v", err)
+	}
+	if len(intLog.entries) != 1 {
+		t.Fatalf("want 1 integration log entry, got %d", len(intLog.entries))
+	}
+	if intLog.entries[0].ErrorText != "marketplace_unavailable" {
+		t.Fatalf("integration log error_text: %q, want %q",
+			intLog.entries[0].ErrorText, "marketplace_unavailable")
+	}
+}

@@ -85,7 +85,7 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 			return nil, integration.ErrRateLimited
 		} else if resp.StatusCode >= 500 {
 			_ = resp.Body.Close()
-			lastErr = fmt.Errorf("ozon: server error %d", resp.StatusCode)
+			lastErr = fmt.Errorf("ozon: server error %d: %w", resp.StatusCode, integration.ErrUnexpectedStatus)
 		} else {
 			return resp, nil
 		}
@@ -122,7 +122,7 @@ func (c *Client) TestAuth(ctx context.Context) error {
 		return integration.ErrUnauthorized
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("ozon: seller/info status %d", resp.StatusCode)
+		return fmt.Errorf("ozon: seller/info status %d: %w", resp.StatusCode, integration.ErrUnexpectedStatus)
 	}
 	return nil
 }
@@ -294,7 +294,7 @@ func (c *Client) fetchStocks(ctx context.Context, productIDs []int64) (map[int64
 		}
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
-			return nil, fmt.Errorf("ozon: stocks status %d", resp.StatusCode)
+			return nil, fmt.Errorf("ozon: stocks status %d: %w", resp.StatusCode, integration.ErrUnexpectedStatus)
 		}
 		var stocks stockResponse
 		if err := json.NewDecoder(resp.Body).Decode(&stocks); err != nil {
@@ -377,7 +377,7 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		return fmt.Errorf("ozon: update status %d", resp.StatusCode)
+		return fmt.Errorf("ozon: update status %d: %w", resp.StatusCode, integration.ErrUnexpectedStatus)
 	}
 
 	type updateResultItem struct {

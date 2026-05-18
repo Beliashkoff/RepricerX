@@ -257,7 +257,21 @@ export default function Shops() {
       qc.invalidateQueries({ queryKey: ['shops'] })
       toast.success(data.message || 'Подключение успешно')
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error & { code?: string }) => {
+      if (e.code === 'marketplace_unavailable') {
+        toast.error('Маркетплейс временно недоступен', {
+          description: 'Сервер WB/Ozon вернул неожиданный ответ. Подождите и повторите проверку.',
+        })
+        return
+      }
+      if (e.code === 'marketplace_rate_limited') {
+        toast.error('Маркетплейс ограничил запросы', {
+          description: 'Подождите несколько минут и повторите.',
+        })
+        return
+      }
+      toast.error(e.message)
+    },
   })
 
   const deleteMutation = useMutation({

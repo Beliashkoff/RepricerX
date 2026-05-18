@@ -32,6 +32,7 @@ type Product struct {
 	ID           uuid.UUID
 	ShopID       uuid.UUID
 	ExternalSKU  string
+	VendorCode   *string
 	Name         string
 	CurrentPrice float64
 	Currency     string

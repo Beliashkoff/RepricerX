@@ -225,7 +225,13 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
           <DialogTitle className="truncate">{product.name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="text-xs text-[#888]">SKU: {product.external_sku}</div>
+          <div className="text-xs text-[#888]">
+            {product.vendor_code ? (
+              <>Артикул: {product.vendor_code} · ID: {product.external_sku}</>
+            ) : (
+              <>SKU: {product.external_sku}</>
+            )}
+          </div>
           <div className="grid gap-3">
             <div className="space-y-1">
               <Label className="text-xs">Мин. цена</Label>
@@ -855,7 +861,16 @@ export default function Products() {
                     <td className="px-4 py-3 font-medium text-[#111] max-w-[200px]">
                       <p className="truncate">{p.name}</p>
                     </td>
-                    <td className="px-4 py-3 text-[#666] font-mono text-xs">{p.external_sku}</td>
+                    <td className="px-4 py-3 text-[#666] font-mono text-xs">
+                      {p.vendor_code ? (
+                        <div className="flex flex-col">
+                          <span>{p.vendor_code}</span>
+                          <span className="text-[10px] text-[#999]">{p.external_sku}</span>
+                        </div>
+                      ) : (
+                        p.external_sku
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold text-[#111]">
                       {formatPrice(p.current_price)}
                     </td>

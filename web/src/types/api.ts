@@ -56,6 +56,7 @@ export interface Product {
   id: string
   shop_id: string
   external_sku: string
+  vendor_code: string | null
   name: string
   current_price: number
   currency: string

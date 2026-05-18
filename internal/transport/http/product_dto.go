@@ -17,6 +17,7 @@ type productResponse struct {
 	ID           string     `json:"id"`
 	ShopID       string     `json:"shopId"`
 	ExternalSKU  string     `json:"externalSku"`
+	VendorCode   *string    `json:"vendorCode,omitempty"`
 	Name         string     `json:"name"`
 	CurrentPrice float64    `json:"currentPrice"`
 	Currency     string     `json:"currency"`

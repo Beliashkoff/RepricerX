@@ -51,8 +51,11 @@ func TestStore_PartitionedByMarketplace(t *testing.T) {
 	if len(wb) == 0 {
 		t.Fatal("пустой WB seed")
 	}
-	if wb[0].ExternalSKU[:2] != "WB" {
-		t.Fatalf("ожидался WB-префикс, получен %q", wb[0].ExternalSKU)
+	// После перехода WB-адаптера на nmID-as-ExternalSKU цифровой префикс
+	// различает маркетплейсы вместо буквенного. WB seed использует "1001XXXXX",
+	// vendorCode хранит человеко-читаемый "WB-…".
+	if wb[0].VendorCode[:2] != "WB" {
+		t.Fatalf("ожидался WB-vendorCode-префикс, получен %q", wb[0].VendorCode)
 	}
 	oz := s.List("ozon", "shop-1")
 	if oz[0].ExternalSKU[:2] != "OZ" {

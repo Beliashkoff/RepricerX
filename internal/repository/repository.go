@@ -340,6 +340,7 @@ type OptionalFloat64 struct {
 
 type ProductImportRow struct {
 	ExternalSKU  string
+	VendorCode   *string
 	Name         string
 	CurrentPrice float64
 	Currency     string

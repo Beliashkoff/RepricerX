@@ -281,8 +281,14 @@ func (s *Service) syncShopPricesIfStale(ctx context.Context, shopID, userID uuid
 
 	rows := make([]repository.ProductImportRow, 0, len(skus))
 	for _, sku := range skus {
+		var vendorCode *string
+		if sku.VendorCode != "" {
+			vc := sku.VendorCode
+			vendorCode = &vc
+		}
 		rows = append(rows, repository.ProductImportRow{
 			ExternalSKU:  sku.ExternalSKU,
+			VendorCode:   vendorCode,
 			Name:         sku.Name,
 			CurrentPrice: sku.CurrentPrice,
 			Currency:     sku.Currency,

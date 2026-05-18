@@ -528,12 +528,17 @@ func (s *Service) ExportCSV(ctx context.Context, userID uuid.UUID, filter ListFi
 
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
-	_ = w.Write([]string{"id", "shop_id", "external_sku", "name", "current_price", "currency", "status", "min_price", "max_price", "cost_price", "updated_at"})
+	_ = w.Write([]string{"id", "shop_id", "external_sku", "vendor_code", "name", "current_price", "currency", "status", "min_price", "max_price", "cost_price", "updated_at"})
 	for _, p := range products {
+		vendorCode := ""
+		if p.VendorCode != nil {
+			vendorCode = *p.VendorCode
+		}
 		row := []string{
 			p.ID.String(),
 			p.ShopID.String(),
 			csvSafeText(p.ExternalSKU),
+			csvSafeText(vendorCode),
 			csvSafeText(p.Name),
 			fmt.Sprintf("%.2f", p.CurrentPrice),
 			csvSafeText(p.Currency),
@@ -632,10 +637,18 @@ func normalizeImportRows(skus []integration.SKU) ([]repository.ProductImportRow,
 		if name == "" {
 			name = externalSKU
 		}
+		vendorCode := strings.TrimSpace(sku.VendorCode)
+		if len(vendorCode) > 100 {
+			vendorCode = vendorCode[:100]
+		}
+		var vendorCodePtr *string
+		if vendorCode != "" {
+			vendorCodePtr = &vendorCode
+		}
 		seen[externalSKU] = struct{}{}
 		rows = append(rows, repository.ProductImportRow{
-			ExternalSKU: externalSKU,
-			Name:        name, CurrentPrice: sku.CurrentPrice, Currency: currency,
+			ExternalSKU: externalSKU, VendorCode: vendorCodePtr,
+			Name: name, CurrentPrice: sku.CurrentPrice, Currency: currency,
 			Status: domain.ProductStatusActive, StockCount: nonNegativeInt(sku.StockCount),
 		})
 	}

@@ -64,6 +64,9 @@ var (
 	testDispatcherSvc *dispatchersvc.Service
 	// allowAuthFail управляет тем, вернёт ли fakeMarketplace ошибку auth.
 	testShopAuthFail        bool
+	// testShopUnavailable — fakeMarketplace.TestAuth возвращает ErrUnexpectedStatus,
+	// чтобы покрыть HTTP 502 marketplace_unavailable.
+	testShopUnavailable     bool
 	testSKUs                []integration.SKU
 	testListSKUsErr         error
 	testCompetitorPrice     *float64
@@ -83,6 +86,9 @@ type fakeMarketplace struct{}
 func (f *fakeMarketplace) TestAuth(_ context.Context) error {
 	if testShopAuthFail {
 		return integration.ErrUnauthorized
+	}
+	if testShopUnavailable {
+		return fmt.Errorf("fake: %w", integration.ErrUnexpectedStatus)
 	}
 	return nil
 }
@@ -265,6 +271,7 @@ func truncate(t *testing.T) {
 		RESTART IDENTITY CASCADE
 	`)
 	testShopAuthFail = false
+	testShopUnavailable = false
 	testSKUs = nil
 	testListSKUsErr = nil
 	testCompetitorPrice = nil

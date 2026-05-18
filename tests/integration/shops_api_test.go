@@ -446,6 +446,32 @@ func TestShopTestConnection_NotFound(t *testing.T) {
 	mustStatus(t, resp, http.StatusNotFound)
 }
 
+func TestShopTestConnection_MarketplaceUnavailable(t *testing.T) {
+	truncate(t)
+	testShopUnavailable = true
+	defer func() { testShopUnavailable = false }()
+
+	client := loginAsNewUser(t, "test_unavail")
+	resp := doJSON(t, client, http.MethodPost, "/api/shops", map[string]any{
+		"marketplace": "wb", "name": "Shop", "credentials": wbCreds(),
+	}, withOrigin())
+	var created map[string]any
+	mustDecode(t, resp, &created)
+	shopID := created["id"].(string)
+
+	testResp := doJSON(t, client, http.MethodPost, "/api/shops/"+shopID+"/test", nil, withOrigin())
+	mustStatus(t, testResp, http.StatusBadGateway)
+	mustErrorCode(t, testResp, "marketplace_unavailable")
+
+	// Status в БД должен стать error
+	shopResp := doJSON(t, client, http.MethodGet, "/api/shops/"+shopID, nil)
+	var shopData map[string]any
+	mustDecode(t, shopResp, &shopData)
+	if shopData["status"] != "error" {
+		t.Fatalf("shop status should be error after unavailable test, got %v", shopData["status"])
+	}
+}
+
 // --- Multiple shops ---
 
 func TestShopList_MultipleShops(t *testing.T) {

@@ -199,7 +199,9 @@ func (h *ShopHandler) Delete(c *gin.Context) {
 //	@Failure		403	{object}	errorResponse			"CSRF — Origin не совпадает"
 //	@Failure		404	{object}	errorResponse			"Магазин не найден"
 //	@Failure		422	{object}	errorResponse			"Ошибка авторизации в маркетплейсе (код: auth_failed)"
+//	@Failure		429	{object}	errorResponse			"Маркетплейс ограничил запросы (код: marketplace_rate_limited)"
 //	@Failure		500	{object}	errorResponse
+//	@Failure		502	{object}	errorResponse			"Маркетплейс недоступен (код: marketplace_unavailable)"
 //	@Security		SessionCookie
 //	@Router			/api/shops/{id}/test [post]
 func (h *ShopHandler) TestConnection(c *gin.Context) {

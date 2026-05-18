@@ -498,17 +498,18 @@ func TestExportCSVSanitizesFormulaInjection(t *testing.T) {
 	if len(records) != 3 {
 		t.Fatalf("want header plus 2 product rows, got %d", len(records))
 	}
+	// CSV columns: 0=id, 1=shop_id, 2=external_sku, 3=vendor_code, 4=name, 5=current_price, …
 	if records[1][2] != "'=cmd|' /C calc'!A0" {
 		t.Fatalf("formula SKU must be prefixed with apostrophe, got %q", records[1][2])
 	}
-	if records[1][3] != "'  +SUM(1,1)" {
-		t.Fatalf("formula name with leading spaces must be prefixed with apostrophe, got %q", records[1][3])
+	if records[1][4] != "'  +SUM(1,1)" {
+		t.Fatalf("formula name with leading spaces must be prefixed with apostrophe, got %q", records[1][4])
 	}
 	if records[2][2] != "'\t@unsafe" {
 		t.Fatalf("tab-prefixed SKU must be prefixed with apostrophe, got %q", records[2][2])
 	}
-	if records[2][3] != "normal name" {
-		t.Fatalf("safe text must not be modified, got %q", records[2][3])
+	if records[2][4] != "normal name" {
+		t.Fatalf("safe text must not be modified, got %q", records[2][4])
 	}
 }
 

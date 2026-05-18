@@ -520,7 +520,8 @@ func parseNullableFloat(c *gin.Context, raw json.RawMessage) (*float64, bool) {
 func toProductResponse(p *domain.Product) productResponse {
 	return productResponse{
 		ID: p.ID.String(), ShopID: p.ShopID.String(),
-		ExternalSKU: p.ExternalSKU, Name: p.Name, CurrentPrice: p.CurrentPrice,
+		ExternalSKU: p.ExternalSKU, VendorCode: p.VendorCode,
+		Name: p.Name, CurrentPrice: p.CurrentPrice,
 		Currency: p.Currency, Status: p.Status,
 		MinPrice: p.MinPrice, MaxPrice: p.MaxPrice, CostPrice: p.CostPrice,
 		StockCount: p.StockCount, Rating: p.Rating, ReviewsCount: p.ReviewsCount,

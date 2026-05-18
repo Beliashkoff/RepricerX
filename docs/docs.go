@@ -2149,8 +2149,20 @@ const docTemplate = `{
                             "$ref": "#/definitions/transport.errorResponse"
                         }
                     },
+                    "429": {
+                        "description": "Маркетплейс ограничил запросы (код: marketplace_rate_limited)",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/transport.errorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Маркетплейс недоступен (код: marketplace_unavailable)",
                         "schema": {
                             "$ref": "#/definitions/transport.errorResponse"
                         }
@@ -2668,6 +2680,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "updatedAt": {
+                    "type": "string"
+                },
+                "vendorCode": {
                     "type": "string"
                 }
             }

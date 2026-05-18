@@ -14,8 +14,11 @@ apiClient.interceptors.response.use(
     if (status === 401 && !url.includes('/auth/me')) {
       window.dispatchEvent(new CustomEvent('rx:unauthorized'))
     }
+    const code = err.response?.data?.error?.code
     const msg = err.response?.data?.error?.message || err.response?.data?.message || err.message || 'Ошибка запроса'
-    return Promise.reject(new Error(msg))
+    const e = new Error(msg) as Error & { code?: string }
+    if (code) e.code = code
+    return Promise.reject(e)
   }
 )
 

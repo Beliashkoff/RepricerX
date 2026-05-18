@@ -19,11 +19,12 @@ import (
 )
 
 var (
-	ErrShopNotFound       = errors.New("shop not found")
-	ErrInvalidMarketplace = errors.New("invalid marketplace")
-	ErrInvalidCredentials = errors.New("invalid marketplace credentials")
-	ErrAuthFailed         = errors.New("marketplace auth failed")
-	ErrRateLimited        = errors.New("shop: rate limited by marketplace")
+	ErrShopNotFound           = errors.New("shop not found")
+	ErrInvalidMarketplace     = errors.New("invalid marketplace")
+	ErrInvalidCredentials     = errors.New("invalid marketplace credentials")
+	ErrAuthFailed             = errors.New("marketplace auth failed")
+	ErrRateLimited            = errors.New("shop: rate limited by marketplace")
+	ErrMarketplaceUnavailable = errors.New("marketplace temporarily unavailable")
 )
 
 const maxCredentialsJSONBytes = 4 * 1024
@@ -247,13 +248,17 @@ func (s *Service) TestConnection(ctx context.Context, userID, shopID uuid.UUID) 
 
 	if testErr != nil {
 		newStatus = domain.ShopStatusError
-		if errors.Is(testErr, integration.ErrUnauthorized) {
+		switch {
+		case errors.Is(testErr, integration.ErrUnauthorized):
 			logEntry.ErrorText = "auth_failed"
 			testErr = ErrAuthFailed
-		} else if errors.Is(testErr, integration.ErrRateLimited) {
+		case errors.Is(testErr, integration.ErrRateLimited):
 			logEntry.ErrorText = "marketplace_rate_limited"
 			testErr = ErrRateLimited
-		} else {
+		case errors.Is(testErr, integration.ErrUnexpectedStatus):
+			logEntry.ErrorText = "marketplace_unavailable"
+			testErr = ErrMarketplaceUnavailable
+		default:
 			logEntry.ErrorText = "marketplace_test_failed"
 		}
 	}

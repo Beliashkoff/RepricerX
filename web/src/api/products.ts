@@ -13,6 +13,7 @@ interface ProductResponse {
   id: string
   shopId: string
   externalSku: string
+  vendorCode?: string | null
   name: string
   currentPrice: number
   currency: string
@@ -43,6 +44,7 @@ function toProduct(p: ProductResponse): Product {
     id: p.id,
     shop_id: p.shopId,
     external_sku: p.externalSku,
+    vendor_code: p.vendorCode ?? null,
     name: p.name,
     current_price: p.currentPrice,
     currency: p.currency,

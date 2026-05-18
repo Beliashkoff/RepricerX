@@ -11,9 +11,15 @@ var ErrUnauthorized = errors.New("marketplace: unauthorized")
 // ErrRateLimited возвращается адаптером при превышении лимита запросов (HTTP 429).
 var ErrRateLimited = errors.New("marketplace: rate limited")
 
+// ErrUnexpectedStatus возвращается, когда маркетплейс отдал не-2xx ответ,
+// который мы не умеем классифицировать (не 401/403/429). Сервис мапит его в
+// ErrMarketplaceUnavailable → HTTP 502.
+var ErrUnexpectedStatus = errors.New("marketplace: unexpected status")
+
 // SKU — товарная позиция, полученная от маркетплейса.
 type SKU struct {
-	ExternalSKU  string
+	ExternalSKU  string // WB: nmID десятичной строкой; Ozon: offer_id.
+	VendorCode   string // WB: vendorCode (артикул продавца). Ozon: пусто.
 	Name         string
 	CurrentPrice float64
 	Currency     string
@@ -24,6 +30,7 @@ type SKU struct {
 type PriceUpdate struct {
 	ExternalSKU string
 	NewPrice    float64
+	Discount    int // WB: обязательное поле в /api/v2/upload/task (0 допустимо). Ozon игнорирует.
 }
 
 // Marketplace — единый контракт для всех адаптеров маркетплейсов.
