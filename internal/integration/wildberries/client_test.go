@@ -12,29 +12,24 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/integration"
 )
 
-// withBaseURLs временно подменяет глобальные базовые URL-ы и возвращает функцию-восстановитель.
-// Пустые строки оставляют базу прежней.
-func withBaseURLs(t *testing.T, common, content, prices string) {
-	t.Helper()
-	origCommon, origContent, origPrices := commonBase, contentBase, pricesBase
-	if common != "" {
-		commonBase = common
+// newTestClient собирает Client с переданными базами; пустые остаются дефолтными.
+func newTestClient(common, content, prices string) *Client {
+	if common == "" {
+		common = defaultCommonBase
 	}
-	if content != "" {
-		contentBase = content
+	if content == "" {
+		content = defaultContentBase
 	}
-	if prices != "" {
-		pricesBase = prices
+	if prices == "" {
+		prices = defaultPricesBase
 	}
-	t.Cleanup(func() {
-		commonBase = origCommon
-		contentBase = origContent
-		pricesBase = origPrices
-	})
-}
-
-func newTestClient() *Client {
-	return &Client{apiKey: "test-api-key", http: &http.Client{}}
+	return &Client{
+		apiKey:      "test-api-key",
+		http:        &http.Client{},
+		commonBase:  common,
+		contentBase: content,
+		pricesBase:  prices,
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -52,9 +47,8 @@ func TestWB_TestAuth_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
-	withBaseURLs(t, "", "", ts.URL)
 
-	if err := newTestClient().TestAuth(t.Context()); err != nil {
+	if err := newTestClient("", "", ts.URL).TestAuth(t.Context()); err != nil {
 		t.Fatalf("ожидали nil, получили: %v", err)
 	}
 }
@@ -67,9 +61,8 @@ func TestWB_TestAuth_Unauthorized(t *testing.T) {
 				w.WriteHeader(code)
 			}))
 			defer ts.Close()
-			withBaseURLs(t, "", "", ts.URL)
 
-			err := newTestClient().TestAuth(t.Context())
+			err := newTestClient("", "", ts.URL).TestAuth(t.Context())
 			if !errors.Is(err, integration.ErrUnauthorized) {
 				t.Fatalf("HTTP %d: ожидали ErrUnauthorized, получили %v", code, err)
 			}
@@ -82,9 +75,8 @@ func TestWB_TestAuth_NotFoundWrapsUnexpectedStatus(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer ts.Close()
-	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient().TestAuth(t.Context())
+	err := newTestClient("", "", ts.URL).TestAuth(t.Context())
 	if err == nil {
 		t.Fatal("ожидали ошибку при 404, получили nil")
 	}
@@ -99,9 +91,8 @@ func TestWB_TestAuth_ServerErrorAfterRetriesWrapsUnexpectedStatus(t *testing.T) 
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
-	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient().TestAuth(t.Context())
+	err := newTestClient("", "", ts.URL).TestAuth(t.Context())
 	if err == nil {
 		t.Fatal("ожидали ошибку при 500, получили nil")
 	}
@@ -149,9 +140,7 @@ func TestWB_ListSKUs_CardsAndPricesMerged(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer pricesTS.Close()
-	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
-
-	skus, err := newTestClient().ListSKUs(t.Context())
+	skus, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
@@ -186,9 +175,7 @@ func TestWB_ListSKUs_GoodsFilterEmpty_PriceIsZero(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"listGoods": []map[string]any{}}})
 	}))
 	defer pricesTS.Close()
-	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
-
-	skus, err := newTestClient().ListSKUs(t.Context())
+	skus, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
@@ -214,9 +201,7 @@ func TestWB_ListSKUs_GoodsFilter4xx_HardFail(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer pricesTS.Close()
-	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
-
-	_, err := newTestClient().ListSKUs(t.Context())
+	_, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
 	if err == nil {
 		t.Fatal("ожидали ошибку при 400 от goods/filter, получили nil")
 	}
@@ -275,9 +260,7 @@ func TestWB_ListSKUs_Pagination(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"listGoods": []map[string]any{}}})
 	}))
 	defer pricesTS.Close()
-	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
-
-	skus, err := newTestClient().ListSKUs(t.Context())
+	skus, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
@@ -306,9 +289,7 @@ func TestWB_UpdatePrices_PayloadShape(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
-	withBaseURLs(t, "", "", ts.URL)
-
-	err := newTestClient().UpdatePrices(t.Context(), []integration.PriceUpdate{
+	err := newTestClient("", "", ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
 		{ExternalSKU: "12345", NewPrice: 1500},
 		{ExternalSKU: "67890", NewPrice: 2750, Discount: 10},
 	})
@@ -343,9 +324,7 @@ func TestWB_UpdatePrices_InvalidNmID(t *testing.T) {
 		t.Fatal("сервер не должен быть вызван при невалидном nmID")
 	}))
 	defer ts.Close()
-	withBaseURLs(t, "", "", ts.URL)
-
-	err := newTestClient().UpdatePrices(t.Context(), []integration.PriceUpdate{
+	err := newTestClient("", "", ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
 		{ExternalSKU: "not-a-number", NewPrice: 100},
 	})
 	if err == nil {
@@ -362,9 +341,7 @@ func TestWB_UpdatePrices_ServerErrorWrapsUnexpectedStatus(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
-	withBaseURLs(t, "", "", ts.URL)
-
-	err := newTestClient().UpdatePrices(t.Context(), []integration.PriceUpdate{
+	err := newTestClient("", "", ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
 		{ExternalSKU: "12345", NewPrice: 100},
 	})
 	if err == nil {

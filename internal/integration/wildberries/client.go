@@ -17,19 +17,22 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 )
 
-// База URL-ов вынесена в var, чтобы тесты могли подменить хосты на httptest.
-var (
-	commonBase  = "https://common-api.wildberries.ru"
-	contentBase = "https://content-api.wildberries.ru"
-	pricesBase  = "https://discounts-prices-api.wildberries.ru"
+// Дефолтные базы WB-сервисов. Тесты конструируют Client с собственными URL-ами.
+const (
+	defaultCommonBase  = "https://common-api.wildberries.ru"
+	defaultContentBase = "https://content-api.wildberries.ru"
+	defaultPricesBase  = "https://discounts-prices-api.wildberries.ru"
 )
 
 // Client — адаптер Wildberries. Реализует integration.Marketplace.
 type Client struct {
-	shopID  string
-	apiKey  string
-	http    *http.Client
-	limiter *ratelimit.Registry
+	shopID      string
+	apiKey      string
+	http        *http.Client
+	limiter     *ratelimit.Registry
+	commonBase  string
+	contentBase string
+	pricesBase  string
 }
 
 // NewClient создаёт клиент из JSON-сериализованных WBCredentials.
@@ -43,10 +46,13 @@ func NewClient(shopID string, credsJSON []byte, limiter *ratelimit.Registry) (*C
 		return nil, errors.New("wb: api_key is required")
 	}
 	return &Client{
-		shopID:  shopID,
-		apiKey:  creds.APIKey,
-		http:    &http.Client{Timeout: 15 * time.Second},
-		limiter: limiter,
+		shopID:      shopID,
+		apiKey:      creds.APIKey,
+		http:        &http.Client{Timeout: 15 * time.Second},
+		limiter:     limiter,
+		commonBase:  defaultCommonBase,
+		contentBase: defaultContentBase,
+		pricesBase:  defaultPricesBase,
 	}, nil
 }
 
@@ -97,7 +103,7 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 func (c *Client) TestAuth(ctx context.Context) error {
 	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			pricesBase+"/ping", nil)
+			c.pricesBase+"/ping", nil)
 		if err != nil {
 			return nil, fmt.Errorf("wb: build request: %w", err)
 		}
@@ -149,7 +155,7 @@ func (c *Client) ListSKUs(ctx context.Context) ([]integration.SKU, error) {
 		currentBody := body
 		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-				contentBase+"/content/v2/get/cards/list",
+				c.contentBase+"/content/v2/get/cards/list",
 				strings.NewReader(currentBody))
 			if err != nil {
 				return nil, fmt.Errorf("wb: build list request: %w", err)
@@ -254,7 +260,7 @@ func (c *Client) fillPrices(ctx context.Context, skus []integration.SKU) error {
 
 		resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-				pricesBase+"/api/v2/list/goods/filter",
+				c.pricesBase+"/api/v2/list/goods/filter",
 				strings.NewReader(payloadStr))
 			if err != nil {
 				return nil, fmt.Errorf("wb: build goods/filter request: %w", err)
@@ -323,7 +329,7 @@ func (c *Client) UpdatePrices(ctx context.Context, updates []integration.PriceUp
 	payloadStr := string(payload)
 	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			pricesBase+"/api/v2/upload/task",
+			c.pricesBase+"/api/v2/upload/task",
 			strings.NewReader(payloadStr))
 		if err != nil {
 			return nil, fmt.Errorf("wb: build update request: %w", err)
