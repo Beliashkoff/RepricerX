@@ -17,7 +17,8 @@ import (
 	"github.com/Beliashkoff/RepricerX/internal/pkg/ratelimit"
 )
 
-const (
+// База URL-ов вынесена в var, чтобы тесты могли подменить хосты на httptest.
+var (
 	commonBase  = "https://common-api.wildberries.ru"
 	contentBase = "https://content-api.wildberries.ru"
 	pricesBase  = "https://discounts-prices-api.wildberries.ru"
@@ -87,14 +88,16 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 	return nil, lastErr
 }
 
-// TestAuth проверяет валидность API-ключа запросом к /ping (Common API).
-// Это документированный WB-эндпоинт connection-check: валидирует токен,
-// URL и соответствие категории сервису. Работает на любой Service-токен.
+// TestAuth проверяет валидность API-ключа запросом к /ping на discounts-prices-api.
+// У WB у каждого сервиса свой /ping, и он валидирует не только токен, но и совпадение
+// его категории с сервисом. Мы пингуем именно Discounts & Prices, потому что без
+// этой категории невозможен core-flow (UpdatePrices), а пинг Common API отказал бы
+// токенам других категорий и сбивал бы с толку.
 // Лимит — 3 запроса/30 сек. https://dev.wildberries.ru/openapi/api-information
 func (c *Client) TestAuth(ctx context.Context) error {
 	resp, err := c.doWithRetry(ctx, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			commonBase+"/ping", nil)
+			pricesBase+"/ping", nil)
 		if err != nil {
 			return nil, fmt.Errorf("wb: build request: %w", err)
 		}

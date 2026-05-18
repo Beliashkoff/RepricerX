@@ -6,64 +6,39 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/Beliashkoff/RepricerX/internal/integration"
 )
 
-// hostRedirectTransport перенаправляет запросы по конкретному хосту WB на тестовый сервер.
-type hostRedirectTransport struct {
-	mu      sync.Mutex
-	servers map[string]string // host (без схемы) → "http://127.0.0.1:PORT"
-}
-
-func newHostRedirectTransport() *hostRedirectTransport {
-	return &hostRedirectTransport{servers: map[string]string{}}
-}
-
-func (t *hostRedirectTransport) set(originalHost, server string) {
-	u, _ := url.Parse(server)
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.servers[originalHost] = u.Host
-}
-
-func (t *hostRedirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.mu.Lock()
-	host, ok := t.servers[req.URL.Host]
-	t.mu.Unlock()
-	clone := req.Clone(req.Context())
-	clone.URL.Scheme = "http"
-	if ok {
-		clone.URL.Host = host
-	}
-	return http.DefaultTransport.RoundTrip(clone)
-}
-
-// newTestClient создаёт WB-клиент, в котором HTTP-запросы перенаправляются на mux,
-// принимающий маршруты для всех трёх хостов: common-api, content-api, discounts-prices-api.
-func newTestClient(common, content, prices string) *Client {
-	tr := newHostRedirectTransport()
+// withBaseURLs временно подменяет глобальные базовые URL-ы и возвращает функцию-восстановитель.
+// Пустые строки оставляют базу прежней.
+func withBaseURLs(t *testing.T, common, content, prices string) {
+	t.Helper()
+	origCommon, origContent, origPrices := commonBase, contentBase, pricesBase
 	if common != "" {
-		tr.set("common-api.wildberries.ru", common)
+		commonBase = common
 	}
 	if content != "" {
-		tr.set("content-api.wildberries.ru", content)
+		contentBase = content
 	}
 	if prices != "" {
-		tr.set("discounts-prices-api.wildberries.ru", prices)
+		pricesBase = prices
 	}
-	return &Client{
-		apiKey: "test-api-key",
-		http:   &http.Client{Transport: tr},
-	}
+	t.Cleanup(func() {
+		commonBase = origCommon
+		contentBase = origContent
+		pricesBase = origPrices
+	})
+}
+
+func newTestClient() *Client {
+	return &Client{apiKey: "test-api-key", http: &http.Client{}}
 }
 
 // ---------------------------------------------------------------------------
-// TestAuth
+// TestAuth — пингует discounts-prices-api/ping
 // ---------------------------------------------------------------------------
 
 func TestWB_TestAuth_Success(t *testing.T) {
@@ -77,9 +52,9 @@ func TestWB_TestAuth_Success(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
+	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient(ts.URL, "", "").TestAuth(t.Context())
-	if err != nil {
+	if err := newTestClient().TestAuth(t.Context()); err != nil {
 		t.Fatalf("ожидали nil, получили: %v", err)
 	}
 }
@@ -92,8 +67,9 @@ func TestWB_TestAuth_Unauthorized(t *testing.T) {
 				w.WriteHeader(code)
 			}))
 			defer ts.Close()
+			withBaseURLs(t, "", "", ts.URL)
 
-			err := newTestClient(ts.URL, "", "").TestAuth(t.Context())
+			err := newTestClient().TestAuth(t.Context())
 			if !errors.Is(err, integration.ErrUnauthorized) {
 				t.Fatalf("HTTP %d: ожидали ErrUnauthorized, получили %v", code, err)
 			}
@@ -102,13 +78,13 @@ func TestWB_TestAuth_Unauthorized(t *testing.T) {
 }
 
 func TestWB_TestAuth_NotFoundWrapsUnexpectedStatus(t *testing.T) {
-	// 404 от common-api — это симптом, который и привёл к этому фиксу.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer ts.Close()
+	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient(ts.URL, "", "").TestAuth(t.Context())
+	err := newTestClient().TestAuth(t.Context())
 	if err == nil {
 		t.Fatal("ожидали ошибку при 404, получили nil")
 	}
@@ -118,18 +94,14 @@ func TestWB_TestAuth_NotFoundWrapsUnexpectedStatus(t *testing.T) {
 }
 
 func TestWB_TestAuth_ServerErrorAfterRetriesWrapsUnexpectedStatus(t *testing.T) {
+	t.Parallel()
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
+	withBaseURLs(t, "", "", ts.URL)
 
-	// Чтобы не ждать 13 секунд бэкоффа, временно подменим клиент. Использовать
-	// fast Client напрямую — внутренние delays приватные. Вместо этого делаем
-	// сетевой выезд в один заход через локальный httptest: WB-клиент сделает 4
-	// попытки за ~13 секунд. Здесь используем t.Parallel чтобы тест не блокировал
-	// общий прогон.
-	t.Parallel()
-	err := newTestClient(ts.URL, "", "").TestAuth(t.Context())
+	err := newTestClient().TestAuth(t.Context())
 	if err == nil {
 		t.Fatal("ожидали ошибку при 500, получили nil")
 	}
@@ -177,8 +149,9 @@ func TestWB_ListSKUs_CardsAndPricesMerged(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer pricesTS.Close()
+	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
 
-	skus, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
+	skus, err := newTestClient().ListSKUs(t.Context())
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
@@ -213,8 +186,9 @@ func TestWB_ListSKUs_GoodsFilterEmpty_PriceIsZero(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"listGoods": []map[string]any{}}})
 	}))
 	defer pricesTS.Close()
+	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
 
-	skus, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
+	skus, err := newTestClient().ListSKUs(t.Context())
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
@@ -240,8 +214,9 @@ func TestWB_ListSKUs_GoodsFilter4xx_HardFail(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer pricesTS.Close()
+	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
 
-	_, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
+	_, err := newTestClient().ListSKUs(t.Context())
 	if err == nil {
 		t.Fatal("ожидали ошибку при 400 от goods/filter, получили nil")
 	}
@@ -300,8 +275,9 @@ func TestWB_ListSKUs_Pagination(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"listGoods": []map[string]any{}}})
 	}))
 	defer pricesTS.Close()
+	withBaseURLs(t, "", contentTS.URL, pricesTS.URL)
 
-	skus, err := newTestClient("", contentTS.URL, pricesTS.URL).ListSKUs(t.Context())
+	skus, err := newTestClient().ListSKUs(t.Context())
 	if err != nil {
 		t.Fatalf("ListSKUs: %v", err)
 	}
@@ -330,8 +306,9 @@ func TestWB_UpdatePrices_PayloadShape(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer ts.Close()
+	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient("", "", ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
+	err := newTestClient().UpdatePrices(t.Context(), []integration.PriceUpdate{
 		{ExternalSKU: "12345", NewPrice: 1500},
 		{ExternalSKU: "67890", NewPrice: 2750, Discount: 10},
 	})
@@ -366,8 +343,9 @@ func TestWB_UpdatePrices_InvalidNmID(t *testing.T) {
 		t.Fatal("сервер не должен быть вызван при невалидном nmID")
 	}))
 	defer ts.Close()
+	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient("", "", ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
+	err := newTestClient().UpdatePrices(t.Context(), []integration.PriceUpdate{
 		{ExternalSKU: "not-a-number", NewPrice: 100},
 	})
 	if err == nil {
@@ -384,8 +362,9 @@ func TestWB_UpdatePrices_ServerErrorWrapsUnexpectedStatus(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
+	withBaseURLs(t, "", "", ts.URL)
 
-	err := newTestClient("", "", ts.URL).UpdatePrices(t.Context(), []integration.PriceUpdate{
+	err := newTestClient().UpdatePrices(t.Context(), []integration.PriceUpdate{
 		{ExternalSKU: "12345", NewPrice: 100},
 	})
 	if err == nil {
