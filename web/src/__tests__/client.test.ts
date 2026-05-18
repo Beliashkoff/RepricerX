@@ -2,44 +2,6 @@ import { describe, it, expect } from 'vitest'
 
 // Тестируем бизнес-логику interceptors в изоляции без реального axios
 
-// --- Request interceptor: логика добавления Origin ---
-describe('CSRF Origin interceptor', () => {
-  const mutatingMethods = ['post', 'patch', 'put', 'delete']
-  const safeMethods = ['get', 'head', 'options']
-
-  function applyRequestInterceptor(config: { method?: string; headers: Record<string, string> }) {
-    if (mutatingMethods.includes(config.method ?? '')) {
-      config.headers['Origin'] = 'http://localhost:3000'
-    }
-    return config
-  }
-
-  it.each(mutatingMethods)('добавляет Origin для %s', (method) => {
-    const config = { method, headers: {} as Record<string, string> }
-    const result = applyRequestInterceptor(config)
-    expect(result.headers['Origin']).toBe('http://localhost:3000')
-  })
-
-  it.each(safeMethods)('не добавляет Origin для %s', (method) => {
-    const config = { method, headers: {} as Record<string, string> }
-    const result = applyRequestInterceptor(config)
-    expect(result.headers['Origin']).toBeUndefined()
-  })
-
-  it('не трогает заголовки если method undefined', () => {
-    const config = { headers: {} as Record<string, string> }
-    const result = applyRequestInterceptor(config)
-    expect(result.headers['Origin']).toBeUndefined()
-  })
-
-  it('не затирает существующие заголовки', () => {
-    const config = { method: 'post', headers: { 'Content-Type': 'application/json' } as Record<string, string> }
-    const result = applyRequestInterceptor(config)
-    expect(result.headers['Content-Type']).toBe('application/json')
-    expect(result.headers['Origin']).toBeDefined()
-  })
-})
-
 // --- Response error interceptor: логика формирования сообщения об ошибке ---
 describe('response error interceptor', () => {
   function applyErrorInterceptor(err: unknown): never {

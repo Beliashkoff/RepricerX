@@ -6,14 +6,6 @@ const apiClient = axios.create({
   withCredentials: true,
 })
 
-// CSRF: бэкенд проверяет Origin на всех mutating-запросах
-apiClient.interceptors.request.use((config) => {
-  if (['post', 'patch', 'put', 'delete'].includes(config.method ?? '')) {
-    config.headers['Origin'] = window.location.origin
-  }
-  return config
-})
-
 apiClient.interceptors.response.use(
   (r) => r,
   (err) => {
