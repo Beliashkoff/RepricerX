@@ -64,9 +64,40 @@ func WithWBLookup(wb WBPriceLookup) Option {
 	return func(s *Service) { s.wb = wb }
 }
 
+// WithOzonLookup явно задаёт реализацию OzonPriceLookup.
+// Используется в cmd/* для выбора источника данных по конфигу.
+func WithOzonLookup(ozon OzonPriceLookup) Option {
+	return func(s *Service) { s.ozon = ozon }
+}
+
+// SelectOzonLookup создаёт реализацию OzonPriceLookup по имени источника.
+// Это единственная точка, где cmd/* зависит от конкретных реализаций.
+//
+//   - "bff" (default) — Ozon BFF JSON API, стабильнее HTML-парсинга
+//   - "html"          — legacy HTML-парсинг (ненадёжен на SPA, оставлен как fallback)
+//   - "mpstats"       — платный агрегатор; требует непустого mpstatsKey
+//
+// Для будущего перехода на MPStats: изменить env OZON_PRICE_SOURCE=mpstats,
+// добавить MPSTATS_API_KEY — и реализовать NewMPStatsOzonLookup (skeleton уже есть).
+func SelectOzonLookup(source, mpstatsKey string) OzonPriceLookup {
+	switch source {
+	case "mpstats":
+		if mpstatsKey != "" {
+			return NewMPStatsOzonLookup(mpstatsKey)
+		}
+		// Ключ не задан — деградируем до BFF с предупреждением (логируется в cmd).
+		fallthrough
+	case "html":
+		return NewHTTPBasedOzonLookup()
+	default: // "bff" и любой неизвестный источник
+		return NewBFFBasedOzonLookup()
+	}
+}
+
 func New(repo repository.ProductCompetitorsRepository, ozon OzonPriceLookup, opts ...Option) *Service {
 	if ozon == nil {
-		ozon = NewHTTPBasedOzonLookup()
+		// По умолчанию используем BFF API — надёжнее HTML-парсинга.
+		ozon = NewBFFBasedOzonLookup()
 	}
 	s := &Service{
 		repo:       repo,

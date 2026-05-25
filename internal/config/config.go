@@ -69,6 +69,17 @@ type Config struct {
 	// Mock-режим маркетплейсов (только dev). При true адаптеры WB/Ozon
 	// заменяются на in-memory заглушки из internal/integration/mock.
 	MockMarketplaces bool
+
+	// Источник цен конкурентов Ozon:
+	//   "bff"      (default) — BFF JSON API Ozon (entrypoint-api.bx), стабильнее HTML
+	//   "html"               — legacy HTML-парсинг (ненадёжен на SPA, для откатов)
+	//   "mpstats"            — платный агрегатор mpstats.io (требует MPStatsAPIKey)
+	OzonPriceSource string
+
+	// MPStatsAPIKey — токен для API mpstats.io.
+	// Пусто = MPStats отключён, SelectOzonLookup деградирует до "bff".
+	// Получить: https://mpstats.io → Настройки → API
+	MPStatsAPIKey string
 }
 
 func Load() (*Config, error) {
@@ -159,6 +170,9 @@ func Load() (*Config, error) {
 	cfg.MaxBodyBytes = maxBody
 
 	cfg.MockMarketplaces, _ = strconv.ParseBool(getEnv("MOCK_MARKETPLACES", "false"))
+
+	cfg.OzonPriceSource = strings.ToLower(strings.TrimSpace(getEnv("OZON_PRICE_SOURCE", "bff")))
+	cfg.MPStatsAPIKey = strings.TrimSpace(getEnv("MPSTATS_API_KEY", ""))
 
 	switch cfg.MailerMode {
 	case "log":

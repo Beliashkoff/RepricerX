@@ -155,9 +155,13 @@ func main() {
 		pricingsvc.WithNotifier(notifierService),
 	)
 
-	// Этап 7: competitor refresh handler. competitor.Service использует ozon-lookup
-	// (или другой источник) для обновления цен конкурентов.
-	competitorService := competitorsvc.New(competitorsRepo, nil, competitorsvc.WithNotifier(notifierService))
+	// Этап 7: competitor refresh handler.
+	// Источник данных Ozon выбирается по конфигу (OZON_PRICE_SOURCE).
+	ozonLookup := competitorsvc.SelectOzonLookup(cfg.OzonPriceSource, cfg.MPStatsAPIKey)
+	if cfg.OzonPriceSource == "html" {
+		log.Warn("OZON_PRICE_SOURCE=html: HTML-парсинг ненадёжен на SPA, рекомендуется bff")
+	}
+	competitorService := competitorsvc.New(competitorsRepo, ozonLookup, competitorsvc.WithNotifier(notifierService))
 	// notifier и notifier-репо инициализированы выше — до dispatcherService.
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

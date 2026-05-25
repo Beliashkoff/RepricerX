@@ -186,7 +186,11 @@ func main() {
 	if cfg.TelegramBotToken != "" {
 		notifierService.Register(notifiersvc.NewTelegramChannel(cfg.TelegramBotToken, telegramLinksRepo, usersRepo, frontendURL))
 	}
-	competitorService := competitorsvc.New(competitorsRepo, nil, competitorsvc.WithNotifier(notifierService))
+	ozonLookup := competitorsvc.SelectOzonLookup(cfg.OzonPriceSource, cfg.MPStatsAPIKey)
+	if cfg.OzonPriceSource == "html" {
+		log.Warn("OZON_PRICE_SOURCE=html: HTML-парсинг ненадёжен на SPA, рекомендуется bff")
+	}
+	competitorService := competitorsvc.New(competitorsRepo, ozonLookup, competitorsvc.WithNotifier(notifierService))
 
 	dispatcherService := dispatchersvc.New(
 		plansRepo, productsRepo, priceChangesRepo, intLogRepo,
