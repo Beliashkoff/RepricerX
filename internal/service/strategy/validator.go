@@ -97,8 +97,8 @@ func validateParams(stratType string, rawParams json.RawMessage) error {
 		if err := json.Unmarshal(rawParams, &p); err != nil {
 			return fmt.Errorf("%w: %s", ErrInvalidStrategyParams, err)
 		}
-		if p.MarginPct < 0 || p.MarginPct > 10000 {
-			return fmt.Errorf("%w: margin_pct must be in [0, 10000]", ErrInvalidStrategyParams)
+		if p.MarginPct < 0 {
+			return fmt.Errorf("%w: margin_pct must be >= 0", ErrInvalidStrategyParams)
 		}
 	}
 	return nil
@@ -126,8 +126,8 @@ func validateConstraints(rawConstraints json.RawMessage) error {
 		return fmt.Errorf("%w: min_price must be <= max_price", ErrInvalidConstraints)
 	}
 	if c.MinProfitPct != nil {
-		if *c.MinProfitPct < 0 || *c.MinProfitPct > 10000 {
-			return fmt.Errorf("%w: min_profit_pct must be in [0, 10000]", ErrInvalidConstraints)
+		if *c.MinProfitPct < 0 {
+			return fmt.Errorf("%w: min_profit_pct must be >= 0", ErrInvalidConstraints)
 		}
 	}
 	if c.MinProfitAbs != nil {
@@ -136,8 +136,8 @@ func validateConstraints(rawConstraints json.RawMessage) error {
 		}
 	}
 	if c.MaxChangePct != nil {
-		if *c.MaxChangePct < 0 || *c.MaxChangePct > 100 {
-			return fmt.Errorf("%w: max_change_pct must be in [0, 100]", ErrInvalidConstraints)
+		if *c.MaxChangePct < 0 {
+			return fmt.Errorf("%w: max_change_pct must be >= 0", ErrInvalidConstraints)
 		}
 	}
 	if c.MinIntervalMin != nil {

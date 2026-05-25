@@ -137,11 +137,11 @@ func TestStrategy_ValidationErrors(t *testing.T) {
 			"invalid_strategy_params",
 		},
 		{
-			// Лимит поднят до 10000 — значения выше должны отклоняться
-			"min_profit_pct > 10000",
+			// Отрицательная min_profit_pct — единственное запрещённое значение
+			"min_profit_pct negative",
 			map[string]any{
 				"name": "x", "type": "fixed", "params": map[string]any{"value": 100},
-				"constraints": map[string]any{"min_profit_pct": 10001},
+				"constraints": map[string]any{"min_profit_pct": -5},
 				"fallbackPolicy": "keep_current",
 			},
 			"invalid_constraints",
