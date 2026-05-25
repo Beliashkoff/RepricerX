@@ -26,9 +26,9 @@ import { shopsApi } from '@/api/shops'
 import { strategiesApi } from '@/api/strategies'
 import { pricingApi } from '@/api/pricing'
 import { useNavigate } from 'react-router-dom'
-import type { Competitor, ImportStatus, Product, ProductListParams, ProductSortField, SortDir, Strategy } from '@/types/api'
+import type { Competitor, CompetitorSearchResult, ImportStatus, Product, ProductListParams, ProductSortField, SortDir, Strategy } from '@/types/api'
 import { formatPrice, formatDate } from '@/lib/utils'
-import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X, Plus, RefreshCw, Save, Trash2, ExternalLink } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Download, Search, FileDown, Pencil, X, Plus, RefreshCw, Save, Trash2, ExternalLink, SearchIcon } from 'lucide-react'
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -120,6 +120,12 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
   const [maxPrice, setMaxPrice] = useState(product.max_price?.toString() ?? '')
   const [costPrice, setCostPrice] = useState(product.cost_price?.toString() ?? '')
   const [competitorTargetInput, setCompetitorTargetInput] = useState('')
+  const [competitorMarketplace, setCompetitorMarketplace] = useState<'ozon' | 'wb'>('ozon')
+  const [addTab, setAddTab] = useState<'id' | 'search'>('id')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchMarketplace, setSearchMarketplace] = useState<'ozon' | 'wb'>('ozon')
+  const [searchResults, setSearchResults] = useState<CompetitorSearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
 
@@ -253,27 +259,149 @@ function EditProductModal({ product, onClose, onSaved }: EditModalProps) {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-[#111]">Конкуренты</h3>
-                <p className="text-xs text-[#888]">Ozon URL или публичный ID товара</p>
+                <p className="text-xs text-[#888]">Отслеживаем цены автоматически каждые 30 мин</p>
               </div>
               <Badge variant="outline">{competitors.length}</Badge>
             </div>
 
-            <div className="flex gap-2">
-              <Input
-                placeholder="https://www.ozon.ru/product/... или ID"
-                value={competitorTargetInput}
-                onChange={e => setCompetitorTargetInput(e.target.value)}
-                disabled={createCompetitorMutation.isPending}
-              />
-              <Button
-                size="icon"
-                title="Добавить конкурента"
-                disabled={!competitorTargetInput.trim() || createCompetitorMutation.isPending}
-                onClick={() => createCompetitorMutation.mutate(competitorTargetInput.trim())}
+            {/* Табы: По ID / Поиск */}
+            <div className="flex gap-1 bg-[#f7f8fa] rounded-xl p-1">
+              <button
+                type="button"
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${addTab === 'id' ? 'bg-white text-[#111] shadow-sm' : 'text-[#888] hover:text-[#555]'}`}
+                onClick={() => setAddTab('id')}
               >
-                <Plus className="h-4 w-4" />
-              </Button>
+                По ID / URL
+              </button>
+              <button
+                type="button"
+                className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-colors ${addTab === 'search' ? 'bg-white text-[#111] shadow-sm' : 'text-[#888] hover:text-[#555]'}`}
+                onClick={() => setAddTab('search')}
+              >
+                <span className="flex items-center justify-center gap-1.5"><SearchIcon className="h-3 w-3" />Найти</span>
+              </button>
             </div>
+
+            {addTab === 'id' && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <select
+                    className="h-11 rounded-xl border border-[#e6e6e6] bg-white px-3 text-sm text-[#111] focus:outline-none focus:ring-2 focus:ring-[#ffcc00]"
+                    value={competitorMarketplace}
+                    onChange={e => setCompetitorMarketplace(e.target.value as 'ozon' | 'wb')}
+                  >
+                    <option value="ozon">Ozon</option>
+                    <option value="wb">WB</option>
+                  </select>
+                  <Input
+                    placeholder={competitorMarketplace === 'ozon' ? 'ID товара или URL ozon.ru' : 'NmID товара или URL wb.ru'}
+                    value={competitorTargetInput}
+                    onChange={e => setCompetitorTargetInput(e.target.value)}
+                    disabled={createCompetitorMutation.isPending}
+                  />
+                  <Button
+                    size="icon"
+                    title="Добавить конкурента"
+                    disabled={!competitorTargetInput.trim() || createCompetitorMutation.isPending}
+                    onClick={() => {
+                      const raw = competitorTargetInput.trim()
+                      // Для WB добавляем префикс "wb:" если это чистый ID
+                      const target = competitorMarketplace === 'wb' && /^\d{6,12}$/.test(raw)
+                        ? `wb:${raw}`
+                        : raw
+                      createCompetitorMutation.mutate(target)
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-[#aaa]">
+                  {competitorMarketplace === 'ozon'
+                    ? 'Например: 1234567890 или https://www.ozon.ru/product/...'
+                    : 'Например: 123456789 (NmID с карточки WB) или https://www.wildberries.ru/catalog/...'}
+                </p>
+              </div>
+            )}
+
+            {addTab === 'search' && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <select
+                    className="h-11 rounded-xl border border-[#e6e6e6] bg-white px-3 text-sm text-[#111] focus:outline-none focus:ring-2 focus:ring-[#ffcc00]"
+                    value={searchMarketplace}
+                    onChange={e => { setSearchMarketplace(e.target.value as 'ozon' | 'wb'); setSearchResults([]) }}
+                  >
+                    <option value="ozon">Ozon</option>
+                    <option value="wb">WB</option>
+                  </select>
+                  <Input
+                    placeholder="Ключевое слово или название товара"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    onKeyDown={async e => {
+                      if (e.key === 'Enter' && searchQuery.trim()) {
+                        setSearchLoading(true)
+                        try {
+                          const results = await competitorsApi.search(searchMarketplace, searchQuery.trim())
+                          setSearchResults(results)
+                        } catch {
+                          toast.error('Не удалось выполнить поиск')
+                        } finally {
+                          setSearchLoading(false)
+                        }
+                      }
+                    }}
+                  />
+                  <Button
+                    size="icon"
+                    title="Найти конкурентов"
+                    disabled={!searchQuery.trim() || searchLoading}
+                    onClick={async () => {
+                      setSearchLoading(true)
+                      try {
+                        const results = await competitorsApi.search(searchMarketplace, searchQuery.trim())
+                        setSearchResults(results)
+                      } catch {
+                        toast.error('Не удалось выполнить поиск')
+                      } finally {
+                        setSearchLoading(false)
+                      }
+                    }}
+                  >
+                    {searchLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <SearchIcon className="h-4 w-4" />}
+                  </Button>
+                </div>
+
+                {searchResults.length > 0 && (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto rounded-xl border border-[#e6e6e6] p-2">
+                    {searchResults.map(r => (
+                      <div key={r.external_id} className="flex items-center justify-between gap-2 p-2 rounded-lg hover:bg-[#f7f8fa]">
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[#111] truncate">{r.name}</p>
+                          <p className="text-xs text-[#888]">{r.marketplace.toUpperCase()} · {r.price.toLocaleString('ru-RU')} ₽</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="text-xs shrink-0"
+                          disabled={createCompetitorMutation.isPending}
+                          onClick={() => {
+                            const target = r.marketplace === 'wb' ? `wb:${r.external_id}` : r.external_id
+                            createCompetitorMutation.mutate(target)
+                          }}
+                        >
+                          Добавить
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {searchResults.length === 0 && searchQuery && !searchLoading && (
+                  <p className="text-xs text-center text-[#aaa] py-2">Нажмите Enter или кнопку поиска</p>
+                )}
+              </div>
+            )}
 
             {competitorsLoading ? (
               <div className="space-y-2">

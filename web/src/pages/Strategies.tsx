@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { strategiesApi } from '@/api/strategies'
-import type { Strategy, StrategyType, FallbackPolicy, CreateStrategyPayload, StrategyConstraints } from '@/types/api'
-import { Plus, Trash2, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
+import type { Strategy, StrategyDetail, StrategyType, FallbackPolicy, CreateStrategyPayload, UpdateStrategyPayload, StrategyConstraints } from '@/types/api'
+import { Plus, Trash2, ChevronDown, ChevronUp, ShieldCheck, Pencil } from 'lucide-react'
+import { formatDate, formatPrice } from '@/lib/utils'
 
 const TYPE_LABELS: Record<StrategyType, string> = {
   below_median_pct: 'Ниже медианы на %',
@@ -42,10 +42,30 @@ function paramsForType(type: StrategyType, value: string): Record<string, unknow
 
 function paramLabelForType(type: StrategyType): string {
   switch (type) {
-    case 'fixed': return 'Цена (₽), >0'
-    case 'below_median_pct': return 'Процент ниже медианы (0–20)'
-    case 'min_competitor_plus_step': return 'Шаг от минимума конкурента (₽, 0–500)'
-    case 'min_margin_pct': return 'Минимальная маржа % (0–90)'
+    case 'fixed': return 'Цена (₽)'
+    case 'below_median_pct': return 'Процент ниже медианы'
+    case 'min_competitor_plus_step': return 'Шаг от минимума конкурента (₽)'
+    case 'min_margin_pct': return 'Минимальная маржа %'
+  }
+}
+
+function paramValueFromStrategy(s: Strategy): string {
+  const p = s.params as Record<string, number>
+  switch (s.type) {
+    case 'fixed': return p.value != null ? String(p.value) : ''
+    case 'below_median_pct': return p.pct != null ? String(p.pct) : ''
+    case 'min_competitor_plus_step': return p.step != null ? String(p.step) : ''
+    case 'min_margin_pct': return p.margin_pct != null ? String(p.margin_pct) : ''
+  }
+}
+
+function paramSummary(s: Strategy): string {
+  const p = s.params as Record<string, number>
+  switch (s.type) {
+    case 'fixed': return `Цена: ${formatPrice(p.value)}`
+    case 'below_median_pct': return `−${p.pct}% от медианы`
+    case 'min_competitor_plus_step': return `Мин. конкурент +${p.step} ₽`
+    case 'min_margin_pct': return `Маржа: ${p.margin_pct}%`
   }
 }
 
@@ -53,12 +73,14 @@ function isCompetitorType(type: StrategyType): boolean {
   return type === 'below_median_pct' || type === 'min_competitor_plus_step'
 }
 
-// ConstraintsSection — раскрывающийся блок ограничений
+// ─── ConstraintsSection ──────────────────────────────────────────────────────
+
 function ConstraintsSection({
-  constraints, onChange,
+  constraints, onChange, fallbackPolicy,
 }: {
   constraints: StrategyConstraints
   onChange: (c: StrategyConstraints) => void
+  fallbackPolicy: FallbackPolicy
 }) {
   const [open, setOpen] = useState(false)
 
@@ -96,11 +118,27 @@ function ConstraintsSection({
           <div className="grid grid-cols-2 gap-3">
             <ConstraintField label="Мин. цена (₽)" value={constraints.min_price} onChange={v => upd('min_price', v)} />
             <ConstraintField label="Макс. цена (₽)" value={constraints.max_price} onChange={v => upd('max_price', v)} />
-            <ConstraintField label="Мин. прибыль %" hint="от себестоимости, 0–90" value={constraints.min_profit_pct} onChange={v => upd('min_profit_pct', v)} />
+            <ConstraintField label="Мин. прибыль %" hint="от себестоимости" value={constraints.min_profit_pct} onChange={v => upd('min_profit_pct', v)} />
             <ConstraintField label="Мин. прибыль ₽" hint="над себестоимостью" value={constraints.min_profit_abs} onChange={v => upd('min_profit_abs', v)} />
-            <ConstraintField label="Макс. изм. цены %" hint="за один пересчёт, 0–50" value={constraints.max_change_pct} onChange={v => upd('max_change_pct', v)} />
+            <ConstraintField label="Макс. изм. цены %" hint="за один пересчёт" value={constraints.max_change_pct} onChange={v => upd('max_change_pct', v)} />
             <ConstraintField label="Мин. интервал (мин)" hint="между пересчётами, 1–1440" value={constraints.min_interval_minutes} onChange={v => upd('min_interval_minutes', v)} />
           </div>
+
+          {fallbackPolicy === 'set_fixed' && (
+            <div>
+              <Label className="text-xs text-[#666]">
+                Резервная цена (₽)
+                <span className="text-[#aaa] font-normal"> — применяется когда формула не работает</span>
+              </Label>
+              <Input
+                type="number"
+                className="mt-1 h-8 text-sm"
+                placeholder="Например: 999"
+                value={constraints.fallback_price ?? ''}
+                onChange={e => upd('fallback_price', e.target.value)}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -129,26 +167,51 @@ function ConstraintField({
   )
 }
 
-// CreateStrategyDialog
+// ─── Shared strategy form fields ─────────────────────────────────────────────
+
+interface StrategyFormState {
+  name: string
+  type: StrategyType
+  paramValue: string
+  fallbackPolicy: FallbackPolicy
+  enabled: boolean
+  constraints: StrategyConstraints
+}
+
+function useStrategyForm(initial?: Partial<StrategyFormState>): [StrategyFormState, React.Dispatch<React.SetStateAction<StrategyFormState>>, () => void] {
+  const defaults: StrategyFormState = {
+    name: '',
+    type: 'fixed',
+    paramValue: '',
+    fallbackPolicy: 'keep_current',
+    enabled: true,
+    constraints: {},
+    ...initial,
+  }
+  const [state, setState] = useState<StrategyFormState>(defaults)
+  const reset = () => setState(defaults)
+  return [state, setState, reset]
+}
+
+// ─── CreateStrategyDialog ────────────────────────────────────────────────────
+
 function CreateStrategyDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
-  const [name, setName] = useState('')
-  const [type, setType] = useState<StrategyType>('fixed')
-  const [paramValue, setParamValue] = useState('')
-  const [fallbackPolicy, setFallbackPolicy] = useState<FallbackPolicy>('keep_current')
-  const [enabled, setEnabled] = useState(true)
-  const [constraints, setConstraints] = useState<StrategyConstraints>({})
+  const [form, setForm, resetForm] = useStrategyForm()
+
+  const upd = <K extends keyof StrategyFormState>(k: K, v: StrategyFormState[K]) =>
+    setForm(f => ({ ...f, [k]: v }))
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => {
       const payload: CreateStrategyPayload = {
-        name,
-        type,
-        params: paramsForType(type, paramValue),
-        fallbackPolicy,
-        enabled,
+        name: form.name,
+        type: form.type,
+        params: paramsForType(form.type, form.paramValue),
+        fallbackPolicy: form.fallbackPolicy,
+        enabled: form.enabled,
       }
-      const c = Object.fromEntries(Object.entries(constraints).filter(([, v]) => v !== undefined))
+      const c = Object.fromEntries(Object.entries(form.constraints).filter(([, v]) => v !== undefined))
       if (Object.keys(c).length > 0) payload.constraints = c as StrategyConstraints
       return strategiesApi.create(payload)
     },
@@ -161,90 +224,216 @@ function CreateStrategyDialog({ open, onClose }: { open: boolean; onClose: () =>
     onError: (e: Error) => toast.error(e.message),
   })
 
-  const resetForm = () => {
-    setName(''); setParamValue(''); setType('fixed')
-    setFallbackPolicy('keep_current'); setEnabled(true); setConstraints({})
-  }
-
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) { onClose(); resetForm() } }}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Новая стратегия</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-4">
-          <div>
-            <Label htmlFor="st-name">Название</Label>
-            <Input id="st-name" className="mt-1.5" placeholder="Моя стратегия" value={name} onChange={e => setName(e.target.value)} />
-          </div>
-
-          <div>
-            <Label>Тип стратегии</Label>
-            <Select value={type} onValueChange={v => { setType(v as StrategyType); setParamValue('') }}>
-              <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(TYPE_LABELS) as StrategyType[]).map(t => (
-                  <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {isCompetitorType(type) && (
-              <p className="mt-1.5 text-xs text-[#888]">
-                Для расчёта потребуется ввести цены конкурентов (Этап 5).
-              </p>
-            )}
-          </div>
-
-          <div>
-            <Label htmlFor="st-param">{paramLabelForType(type)}</Label>
-            <Input
-              id="st-param" type="number" className="mt-1.5"
-              placeholder={type === 'fixed' ? '1000' : '5'}
-              value={paramValue}
-              onChange={e => setParamValue(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <Label>Резервная политика</Label>
-            <Select value={fallbackPolicy} onValueChange={v => setFallbackPolicy(v as FallbackPolicy)}>
-              <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(FALLBACK_LABELS) as FallbackPolicy[]).map(p => (
-                  <SelectItem key={p} value={p}>{FALLBACK_LABELS[p]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <ConstraintsSection constraints={constraints} onChange={setConstraints} />
-
-          <div className="flex items-center gap-3">
-            <input
-              id="st-enabled"
-              type="checkbox"
-              className="h-4 w-4 rounded border-[#e6e6e6] accent-[#ffcc00]"
-              checked={enabled}
-              onChange={e => setEnabled(e.target.checked)}
-            />
-            <Label htmlFor="st-enabled">Включить сразу</Label>
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <Button variant="secondary" className="flex-1" onClick={() => { onClose(); resetForm() }}>Отмена</Button>
-            <Button className="flex-1" disabled={!name || !paramValue || isPending} onClick={() => mutate()}>
-              {isPending ? 'Создаём...' : 'Создать'}
-            </Button>
-          </div>
-        </div>
+        <StrategyFormFields
+          form={form}
+          onUpdate={upd}
+          onChangeConstraints={c => upd('constraints', c)}
+          submitLabel={isPending ? 'Создаём...' : 'Создать'}
+          submitDisabled={!form.name || !form.paramValue || isPending}
+          onSubmit={() => mutate()}
+          onCancel={() => { onClose(); resetForm() }}
+        />
       </DialogContent>
     </Dialog>
   )
 }
 
+// ─── EditStrategyDialog ──────────────────────────────────────────────────────
+
+function EditStrategyDialog({ strategyId, open, onClose }: { strategyId: string; open: boolean; onClose: () => void }) {
+  const qc = useQueryClient()
+
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ['strategy', strategyId],
+    queryFn: () => strategiesApi.get(strategyId),
+    enabled: open && !!strategyId,
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Редактировать стратегию</DialogTitle>
+        </DialogHeader>
+        {isLoading || !detail ? (
+          <div className="flex justify-center py-8">
+            <div className="w-6 h-6 border-2 border-[#ffcc00] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <EditStrategyForm
+            detail={detail}
+            onClose={onClose}
+            onSaved={() => {
+              qc.invalidateQueries({ queryKey: ['strategies'] })
+              qc.invalidateQueries({ queryKey: ['strategy', strategyId] })
+            }}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditStrategyForm({ detail, onClose, onSaved }: { detail: StrategyDetail; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<StrategyFormState>({
+    name: detail.name,
+    type: detail.type,
+    paramValue: paramValueFromStrategy(detail),
+    fallbackPolicy: detail.fallbackPolicy,
+    enabled: detail.enabled,
+    constraints: detail.constraints ?? {},
+  })
+
+  const upd = <K extends keyof StrategyFormState>(k: K, v: StrategyFormState[K]) =>
+    setForm(f => ({ ...f, [k]: v }))
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: () => {
+      const patch: UpdateStrategyPayload = {
+        name: form.name,
+        type: form.type,
+        params: paramsForType(form.type, form.paramValue),
+        fallbackPolicy: form.fallbackPolicy,
+        enabled: form.enabled,
+      }
+      const c = Object.fromEntries(Object.entries(form.constraints).filter(([, v]) => v !== undefined))
+      patch.constraints = c as StrategyConstraints
+      return strategiesApi.update(detail.id, patch)
+    },
+    onSuccess: () => {
+      toast.success('Стратегия обновлена')
+      onSaved()
+      onClose()
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  return (
+    <StrategyFormFields
+      form={form}
+      onUpdate={upd}
+      onChangeConstraints={c => upd('constraints', c)}
+      submitLabel={isPending ? 'Сохраняем...' : 'Сохранить'}
+      submitDisabled={!form.name || !form.paramValue || isPending}
+      onSubmit={() => mutate()}
+      onCancel={onClose}
+    />
+  )
+}
+
+// ─── Shared form fields component ────────────────────────────────────────────
+
+function StrategyFormFields({
+  form, onUpdate, onChangeConstraints,
+  submitLabel, submitDisabled, onSubmit, onCancel,
+}: {
+  form: StrategyFormState
+  onUpdate: <K extends keyof StrategyFormState>(k: K, v: StrategyFormState[K]) => void
+  onChangeConstraints: (c: StrategyConstraints) => void
+  submitLabel: string
+  submitDisabled: boolean
+  onSubmit: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <Label htmlFor="st-name">Название</Label>
+        <Input
+          id="st-name" className="mt-1.5" placeholder="Моя стратегия"
+          value={form.name} onChange={e => onUpdate('name', e.target.value)}
+        />
+      </div>
+
+      <div>
+        <Label>Тип стратегии</Label>
+        <Select value={form.type} onValueChange={v => { onUpdate('type', v as StrategyType); onUpdate('paramValue', '') }}>
+          <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(Object.keys(TYPE_LABELS) as StrategyType[]).map(t => (
+              <SelectItem key={t} value={t}>{TYPE_LABELS[t]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {isCompetitorType(form.type) && (
+          <p className="mt-1.5 text-xs text-[#888]">
+            Для расчёта нужны конкуренты — добавьте их на странице товара.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <Label htmlFor="st-param">{paramLabelForType(form.type)}</Label>
+        <Input
+          id="st-param" type="number" className="mt-1.5"
+          placeholder={form.type === 'fixed' ? '1000' : '5'}
+          value={form.paramValue}
+          onChange={e => onUpdate('paramValue', e.target.value)}
+        />
+      </div>
+
+      <div>
+        <Label>Резервная политика</Label>
+        <Select value={form.fallbackPolicy} onValueChange={v => onUpdate('fallbackPolicy', v as FallbackPolicy)}>
+          <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {(Object.keys(FALLBACK_LABELS) as FallbackPolicy[]).map(p => (
+              <SelectItem key={p} value={p}>{FALLBACK_LABELS[p]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {form.fallbackPolicy === 'set_fixed' && (
+          <p className="mt-1.5 text-xs text-[#888]">
+            Укажите резервную цену в разделе «Ограничения» ниже.
+          </p>
+        )}
+        {form.fallbackPolicy === 'set_min' && (
+          <p className="mt-1.5 text-xs text-[#888]">
+            Устанавливает «Мин. цену» из раздела ограничений. Если мин. цена не задана — сохраняет текущую.
+          </p>
+        )}
+      </div>
+
+      <ConstraintsSection
+        constraints={form.constraints}
+        onChange={onChangeConstraints}
+        fallbackPolicy={form.fallbackPolicy}
+      />
+
+      <div className="flex items-center gap-3">
+        <input
+          id="st-enabled"
+          type="checkbox"
+          className="h-4 w-4 rounded border-[#e6e6e6] accent-[#ffcc00]"
+          checked={form.enabled}
+          onChange={e => onUpdate('enabled', e.target.checked)}
+        />
+        <Label htmlFor="st-enabled">Включена</Label>
+      </div>
+
+      <div className="flex gap-3 pt-2">
+        <Button variant="secondary" className="flex-1" onClick={onCancel}>Отмена</Button>
+        <Button className="flex-1" disabled={submitDisabled} onClick={onSubmit}>
+          {submitLabel}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main page ───────────────────────────────────────────────────────────────
+
 export default function Strategies() {
   const [createOpen, setCreateOpen] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
   const qc = useQueryClient()
+
   const { data: strategies = [], isLoading } = useQuery({
     queryKey: ['strategies'],
     queryFn: strategiesApi.list,
@@ -285,6 +474,7 @@ export default function Strategies() {
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <StrategyTypeBadge type={s.type} />
+                  <span className="text-xs text-[#666] font-medium">{paramSummary(s)}</span>
                   {s.assignedCount > 0 && (
                     <Badge variant="outline" className="text-xs">
                       {s.assignedCount} товар{s.assignedCount === 1 ? '' : s.assignedCount < 5 ? 'а' : 'ов'}
@@ -293,19 +483,36 @@ export default function Strategies() {
                   <span className="text-xs text-[#aaa]">Создана {formatDate(s.createdAt)}</span>
                 </div>
               </div>
-              <Button
-                variant="ghost" size="icon"
-                onClick={() => deleteMutation.mutate(s.id)}
-                disabled={deleteMutation.isPending}
-              >
-                <Trash2 className="h-4 w-4 text-[#aaa] hover:text-red-500 transition-colors" />
-              </Button>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost" size="icon"
+                  title="Редактировать стратегию"
+                  onClick={() => setEditId(s.id)}
+                >
+                  <Pencil className="h-4 w-4 text-[#aaa] hover:text-[#555] transition-colors" />
+                </Button>
+                <Button
+                  variant="ghost" size="icon"
+                  onClick={() => deleteMutation.mutate(s.id)}
+                  disabled={deleteMutation.isPending}
+                  title="Удалить стратегию"
+                >
+                  <Trash2 className="h-4 w-4 text-[#aaa] hover:text-red-500 transition-colors" />
+                </Button>
+              </div>
             </div>
           ))}
         </div>
       )}
 
       <CreateStrategyDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      {editId && (
+        <EditStrategyDialog
+          strategyId={editId}
+          open={!!editId}
+          onClose={() => setEditId(null)}
+        />
+      )}
     </AppLayout>
   )
 }

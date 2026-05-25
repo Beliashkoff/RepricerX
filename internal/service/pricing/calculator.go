@@ -55,6 +55,7 @@ type strategyConstraints struct {
 	MinProfitAbs   *float64 `json:"min_profit_abs"`
 	MaxChangePct   *float64 `json:"max_change_pct"`
 	MinIntervalMin *int     `json:"min_interval_minutes"`
+	FallbackPrice  *float64 `json:"fallback_price"`
 }
 
 // Calculate — основная функция расчёта цены.
@@ -235,6 +236,20 @@ func computeTarget(s *domain.Strategy, p *domain.Product, competitors []float64)
 // applyFallback — формула не применима. Применяем strategy.fallback_policy.
 func applyFallback(p *domain.Product, s *domain.Strategy, c *strategyConstraints, reason, detail string) CalculateResult {
 	switch s.FallbackPolicy {
+	case domain.FallbackPolicySetFixed:
+		// Используем fallback_price из constraints, если задана и > 0.
+		if c.FallbackPrice != nil && *c.FallbackPrice > 0 {
+			final := roundMoney(applyCostFloor(*c.FallbackPrice, p))
+			return CalculateResult{
+				TargetPrice:   0,
+				FinalPrice:    final,
+				ConstraintHit: "",
+				Status:        domain.PlanItemStatusSkipped,
+				Reason:        fmt.Sprintf("%s: %s; fallback=set_fixed price=%.2f", reason, detail, *c.FallbackPrice),
+			}
+		}
+		// fallback_price не задана → деградируем до keep_current
+		fallthrough
 	case domain.FallbackPolicySetMin:
 		if c.MinPrice != nil {
 			final := roundMoney(applyCostFloor(*c.MinPrice, p))

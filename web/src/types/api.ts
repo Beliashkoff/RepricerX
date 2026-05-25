@@ -182,6 +182,15 @@ export interface StrategyConstraints {
   min_profit_abs?: number
   max_change_pct?: number
   min_interval_minutes?: number
+  fallback_price?: number
+}
+
+export interface CompetitorSearchResult {
+  marketplace: Marketplace
+  external_id: string
+  name: string
+  price: number
+  url: string
 }
 
 export interface CreateStrategyPayload {

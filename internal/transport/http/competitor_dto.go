@@ -6,6 +6,14 @@ type competitorRequest struct {
 	Target string `json:"target" binding:"required"`
 }
 
+type competitorSearchResult struct {
+	Marketplace string  `json:"marketplace"`
+	ExternalID  string  `json:"external_id"`
+	Name        string  `json:"name"`
+	Price       float64 `json:"price"`
+	URL         string  `json:"url"`
+}
+
 type competitorResponse struct {
 	ID                  string     `json:"id"`
 	ProductID           string     `json:"productId"`

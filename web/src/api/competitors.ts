@@ -1,5 +1,5 @@
 import apiClient from '@/api/client'
-import type { Competitor } from '@/types/api'
+import type { Competitor, CompetitorSearchResult } from '@/types/api'
 
 export const competitorsApi = {
   list: async (productId: string): Promise<Competitor[]> => {
@@ -23,6 +23,13 @@ export const competitorsApi = {
 
   refresh: async (competitorId: string): Promise<Competitor> => {
     const { data } = await apiClient.post<Competitor>(`/competitors/${competitorId}/refresh`)
+    return data
+  },
+
+  search: async (marketplace: 'ozon' | 'wb', q: string, limit = 10): Promise<CompetitorSearchResult[]> => {
+    const { data } = await apiClient.get<CompetitorSearchResult[]>('/competitor-search', {
+      params: { marketplace, q, limit },
+    })
     return data
   },
 }

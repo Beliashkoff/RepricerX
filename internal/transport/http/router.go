@@ -122,6 +122,7 @@ func RegisterRoutes(r *gin.Engine, cfg RouterConfig) {
 		protected.GET("/products", productH.List)
 		protected.GET("/products/export", productH.Export)
 		protected.GET("/products/:id/competitors", competitorH.List)
+		protected.GET("/competitor-search", competitorH.Search)
 		protected.GET("/strategies", strategyH.List)
 		protected.GET("/strategies/:id", strategyH.Get)
 		protected.GET("/audit/price-changes", auditH.ListChanges)

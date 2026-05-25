@@ -2,6 +2,7 @@ package transport
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/Beliashkoff/RepricerX/internal/domain"
@@ -192,12 +193,70 @@ func (h *CompetitorHandler) Refresh(c *gin.Context) {
 	c.JSON(status, toCompetitorResponse(item))
 }
 
+// Search godoc
+//
+//	@Summary		Поиск конкурентов по ключевому слову
+//	@Description	Ищет товары на указанном маркетплейсе по ключевому слову. Не требует аутентификации продавца.
+//	@Tags			competitors
+//	@Produce		json
+//	@Param			marketplace	query		string					true	"Маркетплейс: ozon или wb"
+//	@Param			q			query		string					true	"Ключевое слово"
+//	@Param			limit		query		int						false	"Максимум результатов (по умолчанию 10, макс 20)"
+//	@Success		200			{array}		competitorSearchResult	"Найденные товары"
+//	@Failure		400			{object}	errorResponse
+//	@Failure		401			{object}	errorResponse
+//	@Failure		500			{object}	errorResponse
+//	@Security		SessionCookie
+//	@Router			/api/competitor-search [get]
+func (h *CompetitorHandler) Search(c *gin.Context) {
+	marketplace := c.Query("marketplace")
+	query := c.Query("q")
+	if marketplace == "" || query == "" {
+		errResp(c, http.StatusBadRequest, "bad_request", "Параметры marketplace и q обязательны")
+		return
+	}
+	if marketplace != "ozon" && marketplace != "wb" {
+		errResp(c, http.StatusBadRequest, "bad_request", "Маркетплейс должен быть ozon или wb")
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "10")
+	limit := 10
+	if n, err := parseInt(limitStr); err == nil && n > 0 {
+		limit = n
+	}
+
+	results, err := h.svc.Search(c.Request.Context(), marketplace, query, limit)
+	if err != nil {
+		errResp(c, http.StatusInternalServerError, "search_error", "Не удалось выполнить поиск")
+		return
+	}
+
+	resp := make([]competitorSearchResult, 0, len(results))
+	for _, r := range results {
+		resp = append(resp, competitorSearchResult{
+			Marketplace: r.Marketplace,
+			ExternalID:  r.ExternalID,
+			Name:        r.Name,
+			Price:       r.Price,
+			URL:         r.URL,
+		})
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func parseInt(s string) (int, error) {
+	var n int
+	_, err := fmt.Sscan(s, &n)
+	return n, err
+}
+
 func handleCompetitorErr(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, competitorsvc.ErrProductNotFound), errors.Is(err, competitorsvc.ErrCompetitorNotFound):
 		errResp(c, http.StatusNotFound, "competitor_not_found", "Конкурент не найден")
 	case errors.Is(err, competitorsvc.ErrInvalidTarget):
-		errResp(c, http.StatusBadRequest, "invalid_competitor_target", "Укажите ссылку на товар Ozon или публичный ID товара")
+		errResp(c, http.StatusBadRequest, "invalid_competitor_target", "Укажите ссылку на товар Ozon/WB или ID")
 	case errors.Is(err, competitorsvc.ErrDuplicateCompetitor):
 		errResp(c, http.StatusConflict, "duplicate_competitor", "Этот конкурент уже добавлен к товару")
 	case errors.Is(err, competitorsvc.ErrRefreshFailed):

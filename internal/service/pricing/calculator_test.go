@@ -420,3 +420,45 @@ func TestCalc_CostZeroTreatedAsNil(t *testing.T) {
 		t.Errorf("got %+v, want final=500 (cost=0 ignored)", r)
 	}
 }
+
+func TestCalc_FallbackSetFixed_WithPrice(t *testing.T) {
+	// fallback=set_fixed + fallback_price=750 → при отсутствии конкурентов должны получить 750
+	r := Calculate(CalculateInput{
+		Product:          makeProduct(900, nil),
+		Strategy:         makeStrategy(domain.StrategyTypeBelowMedianPct, map[string]any{"pct": 5}, map[string]any{"fallback_price": 750}, domain.FallbackPolicySetFixed),
+		CompetitorPrices: nil, // нет конкурентов → формула не применима → fallback
+	})
+	if r.Status != domain.PlanItemStatusSkipped {
+		t.Errorf("got status=%q, want skipped", r.Status)
+	}
+	if r.FinalPrice != 750 {
+		t.Errorf("got FinalPrice=%.2f, want 750 (fallback set_fixed)", r.FinalPrice)
+	}
+}
+
+func TestCalc_FallbackSetFixed_WithoutPrice_DegradesToKeepCurrent(t *testing.T) {
+	// fallback=set_fixed но fallback_price не задана → деградирует до keep_current
+	r := Calculate(CalculateInput{
+		Product:          makeProduct(900, nil),
+		Strategy:         makeStrategy(domain.StrategyTypeBelowMedianPct, map[string]any{"pct": 5}, map[string]any{}, domain.FallbackPolicySetFixed),
+		CompetitorPrices: nil,
+	})
+	if r.Status != domain.PlanItemStatusSkipped {
+		t.Errorf("got status=%q, want skipped", r.Status)
+	}
+	if r.FinalPrice != 900 {
+		t.Errorf("got FinalPrice=%.2f, want 900 (keep_current degradation)", r.FinalPrice)
+	}
+}
+
+func TestCalc_FallbackSetFixed_BelowCostFloor(t *testing.T) {
+	// fallback_price=300 но cost=500 → cost-floor поднимает до 500
+	r := Calculate(CalculateInput{
+		Product:          makeProduct(900, ptr(500.0)),
+		Strategy:         makeStrategy(domain.StrategyTypeBelowMedianPct, map[string]any{"pct": 5}, map[string]any{"fallback_price": 300}, domain.FallbackPolicySetFixed),
+		CompetitorPrices: nil,
+	})
+	if r.FinalPrice != 500 {
+		t.Errorf("got FinalPrice=%.2f, want 500 (cost-floor applied over fallback_price=300)", r.FinalPrice)
+	}
+}

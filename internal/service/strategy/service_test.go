@@ -198,54 +198,100 @@ func TestCreate_Fixed_InvalidValue_Zero(t *testing.T) {
 
 func TestCreate_BelowMedianPct_OutOfRange(t *testing.T) {
 	svc, _, _ := newSvc()
+	// Лимит поднят до 100 — значение 101 должно давать ошибку
 	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
 		Name:           "x",
 		Type:           domain.StrategyTypeBelowMedianPct,
-		Params:         mustJSON(map[string]any{"pct": 21}),
+		Params:         mustJSON(map[string]any{"pct": 101}),
 		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
 	})
 	if err == nil {
-		t.Fatal("expected error for pct=21")
+		t.Fatal("expected error for pct=101")
+	}
+}
+
+func TestCreate_BelowMedianPct_HighValue_OK(t *testing.T) {
+	svc, _, _ := newSvc()
+	// Лимит снят — пct=35 должно проходить (ранее было ограничение 20)
+	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
+		Name:           "x",
+		Type:           domain.StrategyTypeBelowMedianPct,
+		Params:         mustJSON(map[string]any{"pct": 35}),
+		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for pct=35: %v", err)
 	}
 }
 
 func TestCreate_MinCompetitorStep_OutOfRange(t *testing.T) {
 	svc, _, _ := newSvc()
+	// Отрицательный шаг — единственное что запрещено
 	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
 		Name:           "x",
 		Type:           domain.StrategyTypeMinCompetitorPlusStep,
-		Params:         mustJSON(map[string]any{"step": 501}),
+		Params:         mustJSON(map[string]any{"step": -1}),
 		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
 	})
 	if err == nil {
-		t.Fatal("expected error for step=501")
+		t.Fatal("expected error for step=-1")
+	}
+}
+
+func TestCreate_MinCompetitorStep_HighValue_OK(t *testing.T) {
+	svc, _, _ := newSvc()
+	// Шаг 2000 ₽ — должно проходить (ранее ограничение 500)
+	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
+		Name:           "x",
+		Type:           domain.StrategyTypeMinCompetitorPlusStep,
+		Params:         mustJSON(map[string]any{"step": 2000}),
+		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for step=2000: %v", err)
 	}
 }
 
 func TestCreate_MinMarginPct_OutOfRange(t *testing.T) {
 	svc, _, _ := newSvc()
+	// Лимит поднят до 10000 — 10001 должно давать ошибку
 	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
 		Name:           "x",
 		Type:           domain.StrategyTypeMinMarginPct,
-		Params:         mustJSON(map[string]any{"margin_pct": 91}),
+		Params:         mustJSON(map[string]any{"margin_pct": 10001}),
 		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
 	})
 	if err == nil {
-		t.Fatal("expected error for margin_pct=91")
+		t.Fatal("expected error for margin_pct=10001")
+	}
+}
+
+func TestCreate_MinMarginPct_HighValue_OK(t *testing.T) {
+	svc, _, _ := newSvc()
+	// Маржа 200% — теперь разрешена (ранее ограничение 90)
+	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
+		Name:           "x",
+		Type:           domain.StrategyTypeMinMarginPct,
+		Params:         mustJSON(map[string]any{"margin_pct": 200}),
+		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error for margin_pct=200: %v", err)
 	}
 }
 
 func TestCreate_Constraints_MinProfitPct_OutOfRange(t *testing.T) {
 	svc, _, _ := newSvc()
+	// Лимит поднят до 10000 — 10001 должно давать ошибку
 	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
 		Name:           "x",
 		Type:           domain.StrategyTypeFixed,
 		Params:         mustJSON(map[string]any{"value": 100}),
-		Constraints:    mustJSON(map[string]any{"min_profit_pct": 120}),
+		Constraints:    mustJSON(map[string]any{"min_profit_pct": 10001}),
 		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
 	})
 	if err == nil {
-		t.Fatal("expected error for min_profit_pct=120")
+		t.Fatal("expected error for min_profit_pct=10001")
 	}
 }
 
@@ -265,15 +311,16 @@ func TestCreate_Constraints_MinPriceGtMaxPrice(t *testing.T) {
 
 func TestCreate_Constraints_MaxChangePct_OutOfRange(t *testing.T) {
 	svc, _, _ := newSvc()
+	// Лимит поднят до 100 — 101 должно давать ошибку
 	_, err := svc.Create(context.Background(), uuid.New(), strategysvc.CreateInput{
 		Name:           "x",
 		Type:           domain.StrategyTypeFixed,
 		Params:         mustJSON(map[string]any{"value": 100}),
-		Constraints:    mustJSON(map[string]any{"max_change_pct": 51}),
+		Constraints:    mustJSON(map[string]any{"max_change_pct": 101}),
 		FallbackPolicy: domain.FallbackPolicyKeepCurrent,
 	})
 	if err == nil {
-		t.Fatal("expected error for max_change_pct=51")
+		t.Fatal("expected error for max_change_pct=101")
 	}
 }
 

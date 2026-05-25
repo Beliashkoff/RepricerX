@@ -42,6 +42,7 @@ type LookupResult struct {
 type Service struct {
 	repo       repository.ProductCompetitorsRepository
 	ozon       OzonPriceLookup
+	wb         WBPriceLookup
 	notifier   NotifierEmitter
 	now        func() time.Time
 	maxURLSize int
@@ -59,6 +60,10 @@ func WithNotifier(n NotifierEmitter) Option {
 	return func(s *Service) { s.notifier = n }
 }
 
+func WithWBLookup(wb WBPriceLookup) Option {
+	return func(s *Service) { s.wb = wb }
+}
+
 func New(repo repository.ProductCompetitorsRepository, ozon OzonPriceLookup, opts ...Option) *Service {
 	if ozon == nil {
 		ozon = NewHTTPBasedOzonLookup()
@@ -66,6 +71,7 @@ func New(repo repository.ProductCompetitorsRepository, ozon OzonPriceLookup, opt
 	s := &Service{
 		repo:       repo,
 		ozon:       ozon,
+		wb:         NewHTTPBasedWBLookup(),
 		now:        func() time.Time { return time.Now().UTC() },
 		maxURLSize: 2048,
 	}
@@ -85,12 +91,22 @@ type UpdateInput struct {
 }
 
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, input CreateInput) (*domain.ProductCompetitor, error) {
-	target, err := normalizeOzonTarget(input.Target, s.maxURLSize)
+	raw := strings.TrimSpace(input.Target)
+
+	// Определяем маркетплейс по содержимому таргета.
+	if isWBTarget(raw) {
+		return s.createWB(ctx, userID, input.ProductID, raw)
+	}
+	return s.createOzon(ctx, userID, input.ProductID, raw)
+}
+
+func (s *Service) createOzon(ctx context.Context, userID, productID uuid.UUID, raw string) (*domain.ProductCompetitor, error) {
+	target, err := normalizeOzonTarget(raw, s.maxURLSize)
 	if err != nil {
 		return nil, err
 	}
 	item, err := s.repo.Create(ctx, userID, repository.CompetitorCreateInput{
-		ProductID:               input.ProductID,
+		ProductID:               productID,
 		Marketplace:             domain.MarketplaceOzon,
 		Source:                  "public_ozon",
 		CompetitorURL:           target.URL,
@@ -104,7 +120,32 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, input CreateInpu
 		return nil, ErrDuplicateCompetitor
 	}
 	if err != nil {
-		return nil, fmt.Errorf("competitor create: %w", err)
+		return nil, fmt.Errorf("competitor create ozon: %w", err)
+	}
+	return item, nil
+}
+
+func (s *Service) createWB(ctx context.Context, userID, productID uuid.UUID, raw string) (*domain.ProductCompetitor, error) {
+	target, err := normalizeWBTarget(raw, s.maxURLSize)
+	if err != nil {
+		return nil, err
+	}
+	item, err := s.repo.Create(ctx, userID, repository.CompetitorCreateInput{
+		ProductID:               productID,
+		Marketplace:             domain.MarketplaceWB,
+		Source:                  "public_wb",
+		CompetitorURL:           target.URL,
+		NormalizedCompetitorURL: target.normalized,
+		OzonPublicProductID:     nil, // не Ozon
+	})
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrProductNotFound
+	}
+	if errors.Is(err, repository.ErrDuplicate) {
+		return nil, ErrDuplicateCompetitor
+	}
+	if err != nil {
+		return nil, fmt.Errorf("competitor create wb: %w", err)
 	}
 	return item, nil
 }
@@ -118,14 +159,32 @@ func (s *Service) List(ctx context.Context, userID, productID uuid.UUID) ([]*dom
 }
 
 func (s *Service) Update(ctx context.Context, userID, competitorID uuid.UUID, input UpdateInput) (*domain.ProductCompetitor, error) {
-	target, err := normalizeOzonTarget(input.Target, s.maxURLSize)
-	if err != nil {
-		return nil, err
+	raw := strings.TrimSpace(input.Target)
+
+	var compURL, normalizedURL string
+	var ozonProductID *string
+
+	if isWBTarget(raw) {
+		target, err := normalizeWBTarget(raw, s.maxURLSize)
+		if err != nil {
+			return nil, err
+		}
+		compURL = target.URL
+		normalizedURL = target.normalized
+	} else {
+		target, err := normalizeOzonTarget(raw, s.maxURLSize)
+		if err != nil {
+			return nil, err
+		}
+		compURL = target.URL
+		normalizedURL = target.normalized
+		ozonProductID = &target.PublicProductID
 	}
+
 	item, err := s.repo.Update(ctx, userID, competitorID, repository.CompetitorUpdateInput{
-		CompetitorURL:           target.URL,
-		NormalizedCompetitorURL: target.normalized,
-		OzonPublicProductID:     &target.PublicProductID,
+		CompetitorURL:           compURL,
+		NormalizedCompetitorURL: normalizedURL,
+		OzonPublicProductID:     ozonProductID,
 	})
 	if errors.Is(err, repository.ErrNotFound) {
 		return nil, ErrCompetitorNotFound
@@ -172,11 +231,29 @@ func (s *Service) Refresh(ctx context.Context, userID, competitorID uuid.UUID) (
 	if err != nil {
 		return nil, fmt.Errorf("competitor get: %w", err)
 	}
-	target := OzonTarget{URL: item.CompetitorURL}
-	if item.OzonPublicProductID != nil {
-		target.PublicProductID = *item.OzonPublicProductID
+
+	var result LookupResult
+	var lookupErr error
+
+	if item.Marketplace == domain.MarketplaceWB {
+		// WB: извлекаем NmID из NormalizedCompetitorURL ("wb:{nmID}") или URL
+		nmID := wbNmIDFromNormalized(item.NormalizedCompetitorURL)
+		if nmID == "" {
+			nmID = WBNmIDFromURL(item.CompetitorURL)
+		}
+		if nmID == "" {
+			lookupErr = fmt.Errorf("%w: cannot extract WB nmID", ErrInvalidTarget)
+		} else {
+			result, lookupErr = s.wb.Lookup(ctx, nmID)
+		}
+	} else {
+		// Ozon (default)
+		target := OzonTarget{URL: item.CompetitorURL}
+		if item.OzonPublicProductID != nil {
+			target.PublicProductID = *item.OzonPublicProductID
+		}
+		result, lookupErr = s.ozon.Lookup(ctx, target)
 	}
-	result, lookupErr := s.ozon.Lookup(ctx, target)
 	check := repository.CompetitorCheckResult{
 		Availability: domain.CompetitorAvailabilityUnknown,
 		Status:       domain.CompetitorStatusFailed,
@@ -315,4 +392,74 @@ func safeLookupErrorCode(err error) string {
 
 func validPrice(price *float64) bool {
 	return price != nil && !math.IsNaN(*price) && !math.IsInf(*price, 0) && *price >= 0
+}
+
+// ─── WB helpers ──────────────────────────────────────────────────────────────
+
+// wbURLPattern — URL вида wildberries.ru/catalog/{nmID}/...
+var wbURLPattern = regexp.MustCompile(`(?i)wildberries\.ru`)
+
+// wbPureIDPattern — чистое числовое значение длиной 6–12 цифр без http
+var wbPureIDPattern = regexp.MustCompile(`^\d{6,12}$`)
+
+// isWBTarget — определяет, относится ли таргет к Wildberries.
+// Принимает: URL wildberries.ru, чистый NmID (6-12 цифр начинается с wb: или просто цифры).
+// Для Ozon характерен префикс "ozon" в URL или 10-значный ID — мы проверяем WB явно.
+func isWBTarget(raw string) bool {
+	if strings.HasPrefix(strings.ToLower(raw), "wb:") {
+		return true
+	}
+	if wbURLPattern.MatchString(raw) {
+		return true
+	}
+	// Если пользователь передал "wb/{nmID}" или просто nmID с пометкой — нет.
+	// Чистые числа без контекста не считаем WB — они могут быть Ozon ID.
+	return false
+}
+
+type normalizedWBTarget struct {
+	NmID       string
+	URL        string
+	normalized string
+}
+
+// normalizeWBTarget — нормализует WB таргет в NmID, URL и normalized key.
+// Принимает: "wildberries.ru/catalog/123456/detail.aspx", "wb:123456", "123456789".
+func normalizeWBTarget(raw string, maxLen int) (normalizedWBTarget, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" || len(value) > maxLen {
+		return normalizedWBTarget{}, ErrInvalidTarget
+	}
+
+	// Убираем префикс "wb:" если есть
+	cleanValue := value
+	if strings.HasPrefix(strings.ToLower(cleanValue), "wb:") {
+		cleanValue = cleanValue[3:]
+	}
+
+	nmID := ""
+	if wbPureIDPattern.MatchString(cleanValue) {
+		nmID = cleanValue
+	} else if wbURLPattern.MatchString(cleanValue) {
+		// Извлекаем nmID из URL: /catalog/{nmID}/detail.aspx
+		nmID = WBNmIDFromURL(cleanValue)
+	}
+
+	if nmID == "" || !IsValidWBNmID(nmID) {
+		return normalizedWBTarget{}, ErrInvalidTarget
+	}
+
+	return normalizedWBTarget{
+		NmID:       nmID,
+		URL:        "https://www.wildberries.ru/catalog/" + nmID + "/detail.aspx",
+		normalized: "wb:" + nmID,
+	}, nil
+}
+
+// wbNmIDFromNormalized — извлекает NmID из normalized URL вида "wb:{nmID}".
+func wbNmIDFromNormalized(normalized string) string {
+	if strings.HasPrefix(normalized, "wb:") {
+		return normalized[3:]
+	}
+	return ""
 }
