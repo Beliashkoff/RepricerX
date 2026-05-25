@@ -128,18 +128,20 @@ func TestStrategy_ValidationErrors(t *testing.T) {
 			"invalid_strategy_params",
 		},
 		{
+			// Лимит поднят до 100 — значения выше 100 должны отклоняться
 			"below_median_pct out of range",
 			map[string]any{
-				"name": "x", "type": "below_median_pct", "params": map[string]any{"pct": 25},
+				"name": "x", "type": "below_median_pct", "params": map[string]any{"pct": 101},
 				"fallbackPolicy": "keep_current",
 			},
 			"invalid_strategy_params",
 		},
 		{
-			"min_profit_pct > 90",
+			// Лимит поднят до 10000 — значения выше должны отклоняться
+			"min_profit_pct > 10000",
 			map[string]any{
 				"name": "x", "type": "fixed", "params": map[string]any{"value": 100},
-				"constraints": map[string]any{"min_profit_pct": 120},
+				"constraints": map[string]any{"min_profit_pct": 10001},
 				"fallbackPolicy": "keep_current",
 			},
 			"invalid_constraints",
